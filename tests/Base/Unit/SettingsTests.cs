@@ -3,10 +3,10 @@ using Croicu.Desk.Tools.Base;
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
-/// Every test passes explicit path/localPath arguments to Settings.Load()/Section() rather than
-/// relying on the current directory's settings.json -- each test also uses its own uniquely-named
-/// temp file, so these run safely in parallel despite Settings.Load()'s Settings.Current side
-/// effect (never read back here).
+/// Every test passes explicit path/localPath/modulePath arguments to Settings.Load()/Section()
+/// rather than relying on the current directory or AppContext.BaseDirectory's real settings.json --
+/// each test also uses its own uniquely-named temp file, so these run safely in parallel despite
+/// Settings.Load()'s Settings.Current side effect (never read back here).
 /// </summary>
 [TestClass]
 public sealed class SettingsTests
@@ -23,12 +23,43 @@ public sealed class SettingsTests
     [TestMethod]
     public void Load_NoSettingsFile_DefaultsToRestrictiveErrorLevelAndGeneralCategory()
     {
-        var settings = Settings.Load(path: NonExistentPath(), localPath: NonExistentPath());
+        var settings = Settings.Load(path: NonExistentPath(), localPath: NonExistentPath(), modulePath: NonExistentPath());
 
         Assert.IsFalse(settings.Debug);
         Assert.AreEqual(TelemetryLevel.Error, settings.LogLevel);
         CollectionAssert.AreEqual(new List<string> { DiagnosticsCategories.General }, settings.LogCategories);
         Assert.IsEmpty(settings.ExcludedCategories);
+        Assert.AreEqual(600, settings.IdleTimeout);
+    }
+
+    [TestMethod]
+    public void Load_ExplicitIdleTimeout_UsesConfiguredValue()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "idleTimeout": 5 } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.AreEqual(5, settings.IdleTimeout);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_IdleTimeoutNotNumber_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "idleTimeout": "not-a-number" } }""");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [TestMethod]
@@ -36,12 +67,14 @@ public sealed class SettingsTests
     {
         Logger.Drain();
 
-        Settings.Load(path: NonExistentPath(), localPath: NonExistentPath());
+        Settings.Load(path: NonExistentPath(), localPath: NonExistentPath(), modulePath: NonExistentPath());
 
         var messages = Logger.Drain();
-        Assert.HasCount(2, messages);
-        Assert.Contains("not found", messages[0]);
-        Assert.Contains("no local settings override", messages[1]);
+        Assert.HasCount(4, messages);
+        Assert.Contains("no module settings file", messages[0]);
+        Assert.Contains("no working directory settings file", messages[1]);
+        Assert.Contains("falling back to restrictive defaults", messages[2]);
+        Assert.Contains("no local settings override", messages[3]);
     }
 
     [TestMethod]
@@ -52,10 +85,10 @@ public sealed class SettingsTests
         {
             Logger.Drain();
 
-            Settings.Load(path: path, localPath: NonExistentPath());
+            Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             var messages = Logger.Drain();
-            Assert.Contains("found and parsed", messages[0]);
+            Assert.Contains("found and parsed", messages[1]);
         }
         finally
         {
@@ -72,11 +105,11 @@ public sealed class SettingsTests
         {
             Logger.Drain();
 
-            var settings = Settings.Load(path: path, localPath: localPath);
+            var settings = Settings.Load(path: path, localPath: localPath, modulePath: NonExistentPath());
 
             Assert.AreEqual(TelemetryLevel.Info, settings.LogLevel);
             var messages = Logger.Drain();
-            Assert.Contains("exists but has no valid 'settings' object", messages[1]);
+            Assert.Contains("exists but has no valid 'settings' object", messages[2]);
         }
         finally
         {
@@ -91,7 +124,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "debug": false, "logLevel": "verbose" } }""");
         try
         {
-            var settings = Settings.Load(path: path, localPath: NonExistentPath());
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             Assert.AreEqual(TelemetryLevel.Verbose, settings.LogLevel);
             Assert.IsEmpty(settings.LogCategories);
@@ -108,7 +141,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "debug": true, "logLevel": "critical" } }""");
         try
         {
-            var settings = Settings.Load(path: path, localPath: NonExistentPath());
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             Assert.AreEqual(TelemetryLevel.Critical, settings.LogLevel);
             CollectionAssert.AreEqual(new List<string> { DiagnosticsCategories.General }, settings.LogCategories);
@@ -125,7 +158,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "debug": true } }""");
         try
         {
-            var settings = Settings.Load(path: path, localPath: NonExistentPath());
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             Assert.IsTrue(settings.Debug);
             Assert.AreEqual(TelemetryLevel.Error, settings.LogLevel);
@@ -143,7 +176,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "bogus" } }""");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
         }
         finally
         {
@@ -157,7 +190,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "logCategories": "not-an-array" } }""");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
         }
         finally
         {
@@ -171,7 +204,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "excludedCategories": "not-an-array" } }""");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
         }
         finally
         {
@@ -185,7 +218,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose", "logCategories": ["custom"] } }""");
         try
         {
-            var settings = Settings.Load(path: path, localPath: NonExistentPath());
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             CollectionAssert.AreEqual(new List<string> { DiagnosticsCategories.General, "custom" }, settings.LogCategories);
         }
@@ -202,7 +235,7 @@ public sealed class SettingsTests
         var localPath = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose" } }""");
         try
         {
-            var settings = Settings.Load(path: basePath, localPath: localPath);
+            var settings = Settings.Load(path: basePath, localPath: localPath, modulePath: NonExistentPath());
 
             Assert.AreEqual(TelemetryLevel.Verbose, settings.LogLevel);
             Assert.IsFalse(settings.Debug);
@@ -215,12 +248,49 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
+    public void Load_ModulePathUsedWhenWorkingDirectoryFileMissing()
+    {
+        var modulePath = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose", "idleTimeout": 7 } }""");
+        try
+        {
+            var settings = Settings.Load(path: NonExistentPath(), localPath: NonExistentPath(), modulePath: modulePath);
+
+            Assert.AreEqual(TelemetryLevel.Verbose, settings.LogLevel);
+            Assert.AreEqual(7, settings.IdleTimeout);
+        }
+        finally
+        {
+            File.Delete(modulePath);
+        }
+    }
+
+    [TestMethod]
+    public void Load_WorkingDirectoryOverridesModulePathKeyByKey()
+    {
+        var modulePath = WriteTempSettingsFile("""{ "settings": { "debug": false, "logLevel": "error", "idleTimeout": 7 } }""");
+        var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose" } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: modulePath);
+
+            Assert.AreEqual(TelemetryLevel.Verbose, settings.LogLevel);
+            Assert.IsFalse(settings.Debug);
+            Assert.AreEqual(7, settings.IdleTimeout);
+        }
+        finally
+        {
+            File.Delete(modulePath);
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
     public void Section_ReturnsEmptyDictionaryWhenSectionMissing()
     {
         var path = WriteTempSettingsFile("""{ "settings": {} }""");
         try
         {
-            var section = Settings.Section("nonexistent", path: path, localPath: NonExistentPath());
+            var section = Settings.Section("nonexistent", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             Assert.IsEmpty(section);
         }
@@ -236,7 +306,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "mySection": { "key": "value" } }""");
         try
         {
-            var section = Settings.Section("mySection", path: path, localPath: NonExistentPath());
+            var section = Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
 
             Assert.IsTrue(section.ContainsKey("key"));
             Assert.AreEqual("value", section["key"].GetString());
@@ -253,7 +323,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "mySection": "not-an-object" }""");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
         }
         finally
         {

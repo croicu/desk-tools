@@ -52,6 +52,7 @@ public static class Program
             try
             {
                 Logger.Info("desk-tools: started.");
+                new Host(settings).Run();
                 Logger.Info("desk-tools: completed.");
                 return 0;
             }

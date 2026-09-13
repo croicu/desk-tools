@@ -18,4 +18,6 @@ public sealed class TestSettings : ISettingsProvider
     public List<string> LogCategories { get; init; } = new() { DiagnosticsCategories.General };
 
     public List<string> ExcludedCategories { get; init; } = new();
+
+    public int IdleTimeout { get; init; } = 600;
 }
