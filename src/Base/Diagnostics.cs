@@ -1,4 +1,4 @@
-namespace Service.Base;
+namespace Croicu.Desk.Tools.Base;
 
 /// <summary>
 /// Not a closed set: category is an open string so callers can introduce new categories without

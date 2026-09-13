@@ -1,6 +1,6 @@
-using Service.Base;
+using Croicu.Desk.Tools.Base;
 
-namespace Service.Base.Tests.Unit;
+namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 [TestClass]
 public sealed class ErrorsTests

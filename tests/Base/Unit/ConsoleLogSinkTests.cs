@@ -1,7 +1,7 @@
-using Service.Base;
-using Service.Mocks;
+using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Mocks;
 
-namespace Service.Base.Tests.Unit;
+namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
 /// ConsoleLogSink.Create()/Dispose()'s InstanceActive guard is now AsyncLocal-scoped (see

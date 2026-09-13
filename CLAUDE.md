@@ -190,7 +190,7 @@ dotnet format
 
 # Test
 dotnet test
-dotnet test --filter "FullyQualifiedName=Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
+dotnet test --filter "FullyQualifiedName=Croicu.Desk.Tools.Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
 
 # Build the Windows MSI installer (Windows-only, WiX cannot build on non-Windows hosts at all --
 # see installer/Setup.wixproj). Not part of the `dotnet build`/`test` commands above;
@@ -244,7 +244,7 @@ dotnet build installer/Setup.wixproj
    the deliberate public surface — `public` is the opt-in, not the default, unlike loose
    file-per-script code where everything ends up accidentally public. If the internal
    implementation is substantial enough that `internal` alone isn't a strong enough signal, nest it
-   under a dedicated sub-namespace (e.g. `Service.Internal`) rather than spreading it flat
+   under a dedicated sub-namespace (e.g. `Croicu.Desk.Tools.Service.Internal`) rather than spreading it flat
    across the project root.
 9. **Keep the internal dependency graph acyclic — break cycles with an interface, not a runtime
    workaround.** If two concrete classes would otherwise need each other, introduce an interface
@@ -252,10 +252,11 @@ dotnet build installer/Setup.wixproj
    concrete type — this is the same seam rule 6's constructor-injection convention already creates,
    just framed as a graph property: depending on an abstraction instead of a concretion is what
    keeps the graph from looping back on itself. Verify this mechanically when it matters, not by
-   feel: list every file's `using Service...;` directives (`grep -E "^using Service" -r src/`)
+   feel: list every file's `using Croicu.Desk.Tools.Service...;` directives (`grep -E "^using
+   Croicu\.Desk\.Tools\.Service" -r src/`)
    and confirm no file is reachable from itself by following them — this now spans a real project
-   boundary too: `src/Base/` (`Base.csproj`) must never reference `Service` (the app's own
-   namespace), since `src/Service/` (`Service.csproj`) already depends on
+   boundary too: `src/Base/` (`Base.csproj`) must never reference `Croicu.Desk.Tools.Service` (the
+   app's own namespace), since `src/Service/` (`Service.csproj`) already depends on
    `Base.csproj` the other way. A passing test suite is not
    proof the graph is acyclic, since load-order luck can mask a real cycle. C# doesn't have
    Python's lazy-import escape hatch for masking a cycle at the language level (a circular
@@ -305,8 +306,8 @@ dotnet build installer/Setup.wixproj
 
 ## Logging
 
-- **Use `Logger`** (`Service.Base.Logger` — lives in the `src/Base` project, not the app's
-  own namespace) — not bare `Console.WriteLine`.
+- **Use `Logger`** (`Croicu.Desk.Tools.Base.Logger` — lives in the `src/Base` project, not
+  the app's own namespace) — not bare `Console.WriteLine`.
 - **`Console.*` is confined to `Diagnostics.cs`** — the Logger's sink implementations
   (`DiagnosticsLogSink`/`ConsoleLogSink`) are the only place allowed to call
   `Console.Write`/`Console.WriteLine`/`Console.Error.WriteLine` directly; everywhere else

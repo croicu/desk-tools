@@ -1,6 +1,6 @@
-using Service.Base;
+using Croicu.Desk.Tools.Base;
 
-namespace Service.Base.Tests.Unit;
+namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
 /// Every test passes explicit path/localPath arguments to Settings.Load()/Section() rather than

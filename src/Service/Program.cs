@@ -1,6 +1,6 @@
-using Service.Base;
+using Croicu.Desk.Tools.Base;
 
-namespace Service;
+namespace Croicu.Desk.Tools.Service;
 
 public sealed record CliArguments(bool Debug = false);
 

@@ -1,6 +1,6 @@
-using Service.Base;
+using Croicu.Desk.Tools.Base;
 
-namespace Service.Mocks;
+namespace Croicu.Desk.Tools.Mocks;
 
 /// <summary>
 /// In-memory <see cref="ISettingsProvider"/> fake for tests -- no file I/O, unlike the real
