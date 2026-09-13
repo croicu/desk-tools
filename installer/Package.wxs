@@ -13,9 +13,15 @@
         <!-- No explicit Feature/ComponentRef: relies on WiX's default-feature auto-inclusion for
              naked Files, same pattern wixtoolset/wix's own HarvestFiles/Directory.wxs test uses,
              which is enough for a single-feature, files-only installer. -->
+        <!-- .pdb files are excluded for Release (today's shipped artifact stays symbol-free) but
+             kept for Debug, so a locally-built/installed MSI can still be debugged against. -->
+        <?if $(var.Configuration) = "Release" ?>
         <Files Include="!(bindpath.App)\**">
           <Exclude Files="!(bindpath.App)\**\*.pdb" />
         </Files>
+        <?else?>
+        <Files Include="!(bindpath.App)\**" />
+        <?endif?>
       </Directory>
     </StandardDirectory>
 
