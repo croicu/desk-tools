@@ -15,45 +15,60 @@ public static class Program
     /// </summary>
     public static int Run(string[]? argv = null, string? settingsPath = null)
     {
-        // No explicit sink setup needed: Logger's default sink is already a live ConsoleLogSink
-        // with safe bootstrap settings (see Diagnostics.cs), so anything logged before settings are
-        // read -- a CLI-parsing error, a malformed settings.json -- is actually printed already;
-        // ConfigureConsole below just narrows it to the real level/categories once settings load.
-        var arguments = ParseArgs(argv ?? Array.Empty<string>());
+        var console = new ServiceConsole();
 
-        Settings settings;
-        try
-        {
-            settings = settingsPath is null ? Settings.Load() : Settings.Load(path: settingsPath);
-        }
-        catch (AppError error)
-        {
-            Logger.Error($"desk-tools: error: {error.Message}");
-            return 1;
-        }
-
-        Logger.ConfigureConsole(
-            minLevel: settings.LogLevel,
-            categories: settings.LogCategories,
-            excludedCategories: settings.ExcludedCategories);
-
-        var debug = settings.Debug || arguments.Debug;
+        // Must run before anything below that can write to the console (ParseArgs' --help text,
+        // Settings.Load's error path) -- on a WinExe launch with no console ancestor, nothing
+        // written before this runs would be visible at all.
+        console.EnsureConsole();
 
         try
         {
-            Logger.Info("desk-tools: started.");
-            Logger.Info("desk-tools: completed.");
-            return 0;
-        }
-        catch (AppError error)
-        {
-            if (debug)
+            // No explicit sink setup needed: Logger's default sink is already a live ConsoleLogSink
+            // with safe bootstrap settings (see Diagnostics.cs), so anything logged before settings
+            // are read -- a CLI-parsing error, a malformed settings.json -- is actually printed
+            // already; ConfigureConsole below just narrows it to the real level/categories once
+            // settings load.
+            var arguments = ParseArgs(argv ?? Array.Empty<string>());
+
+            Settings settings;
+            try
             {
-                throw;
+                settings = settingsPath is null ? Settings.Load() : Settings.Load(path: settingsPath);
+            }
+            catch (AppError error)
+            {
+                Logger.Error($"desk-tools: error: {error.Message}");
+                return 1;
             }
 
-            Logger.Error($"desk-tools: error: {error.Message}");
-            return 1;
+            Logger.ConfigureConsole(
+                minLevel: settings.LogLevel,
+                categories: settings.LogCategories,
+                excludedCategories: settings.ExcludedCategories);
+
+            var debug = settings.Debug || arguments.Debug;
+
+            try
+            {
+                Logger.Info("desk-tools: started.");
+                Logger.Info("desk-tools: completed.");
+                return 0;
+            }
+            catch (AppError error)
+            {
+                if (debug)
+                {
+                    throw;
+                }
+
+                Logger.Error($"desk-tools: error: {error.Message}");
+                return 1;
+            }
+        }
+        finally
+        {
+            console.ReleaseConsole();
         }
     }
 

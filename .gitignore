@@ -4,6 +4,8 @@ obj/
 dist/
 /out/
 /release/
+/publish/
+/publish-debug/
 
 # IDE
 .vs/

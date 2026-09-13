@@ -11,7 +11,11 @@
     <UpgradeCode>{20db6e52-e895-490b-8208-ef74d76e901d}</UpgradeCode>
     <AppPublishDir>$(MSBuildThisFileDirectory)obj\publish\</AppPublishDir>
     <!-- Exposes the properties above to Package.wxs as WiX preprocessor variables ($(var.Name)):
-         WixToolset.Sdk doesn't forward arbitrary MSBuild properties into the compiler on its own. -->
+         WixToolset.Sdk doesn't forward arbitrary MSBuild properties into the compiler on its own.
+         Configuration is NOT added here: WixToolset.Sdk already predefines $(var.Configuration)
+         itself from the MSBuild property of the same name; redeclaring it hits WIX0288. Package.wxs
+         uses that predefined variable to decide whether to bundle .pdb files (Debug: yes, for local
+         debugging against the installed copy; Release: no, matching today's shipped artifact). -->
     <DefineConstants>UpgradeCode=$(UpgradeCode)</DefineConstants>
     <!-- TargetName defaults to the project's own file name (Setup): override so the shipped
          installer is named Service.msi. -->
@@ -32,9 +36,13 @@
        out to `dotnet publish` before the WiX build binds Package.wxs's Files glob against
        $(AppPublishDir). Framework-dependent + win-x64 so Service.exe is a real native
        Windows apphost (see CLAUDE.md's cross-platform Architecture convention, which this project
-       is the deliberate Windows-only exception to, by nature of what an MSI is). -->
+       is the deliberate Windows-only exception to, by nature of what an MSI is). Bundles
+       $(Configuration), not hardcoded to Release, so a plain `dotnet build installer/Setup.wixproj`
+       (defaults to Debug, matching the inner dev loop) bundles a Debug payload into
+       release\Debug\Service.msi, while CD's own `-c Release` invocation bundles a Release payload
+       into release\Release\Service.msi, same as before. -->
   <Target Name="PublishAppForSetup" BeforeTargets="CoreCompile">
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Service\Service.csproj&quot; -c Release -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Service\Service.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
   </Target>
 
 </Project>
