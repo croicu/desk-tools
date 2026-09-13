@@ -1,6 +1,6 @@
-using DeskTools.Base;
+using Service.Base;
 
-namespace DeskTools.Mocks;
+namespace Service.Mocks;
 
 /// <summary>
 /// In-memory <see cref="ISettingsProvider"/> fake for tests -- no file I/O, unlike the real

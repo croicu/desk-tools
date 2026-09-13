@@ -183,20 +183,20 @@ After any change that affects the public interface, CLI, or file formats, update
 dotnet build
 
 # Run
-dotnet run --project src/DeskTools
+dotnet run --project src/Service
 
 # Lint / format
 dotnet format
 
 # Test
 dotnet test
-dotnet test --filter "FullyQualifiedName=DeskTools.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
+dotnet test --filter "FullyQualifiedName=Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
 
 # Build the Windows MSI installer (Windows-only, WiX cannot build on non-Windows hosts at all --
 # see installer/Setup.wixproj). Not part of the `dotnet build`/`test` commands above;
-# desk-tools.slnx does reference installer/Setup.vcxproj (a Solution Explorer-only shim
+# Service.slnx does reference installer/Setup.vcxproj (a Solution Explorer-only shim
 # around the command below, see its own header comment) but with Build Project="false", so it's
-# excluded from `dotnet build desk-tools.slnx` and from a plain `dotnet build` too. Delete
+# excluded from `dotnet build Service.slnx` and from a plain `dotnet build` too. Delete
 # `installer/` and its <Project> entry in the .slnx entirely if this instance doesn't want an MSI.
 dotnet build installer/Setup.wixproj
 ```
@@ -220,9 +220,9 @@ dotnet build installer/Setup.wixproj
 3. `Contracts.cs` contains runtime behavioral interfaces (for things like workers/executors) that
    wire this project's *own* internals together — never referenced by external consumers, unlike
    `Interfaces.cs`'s behavioral interfaces above.
-4. Unit tests (`tests/Base/Unit/`, `tests/DeskTools/Unit/` — one test project per `src/`
+4. Unit tests (`tests/Base/Unit/`, `tests/Service/Unit/` — one test project per `src/`
    project, mirroring the `Base`/app split) must run offline. Integration tests
-   (`tests/Base/Integration/`, `tests/DeskTools/Integration/`), if a project has them, may
+   (`tests/Base/Integration/`, `tests/Service/Integration/`), if a project has them, may
    hit real external services — that's a deliberate scope split, not a loophole in rule 4.
    `dotnet test` (or `dotnet test <project-name>.slnx`) runs every test project's assembly by
    default regardless of folder, so adding an integration suite means accepting network calls in
@@ -244,7 +244,7 @@ dotnet build installer/Setup.wixproj
    the deliberate public surface — `public` is the opt-in, not the default, unlike loose
    file-per-script code where everything ends up accidentally public. If the internal
    implementation is substantial enough that `internal` alone isn't a strong enough signal, nest it
-   under a dedicated sub-namespace (e.g. `DeskTools.Internal`) rather than spreading it flat
+   under a dedicated sub-namespace (e.g. `Service.Internal`) rather than spreading it flat
    across the project root.
 9. **Keep the internal dependency graph acyclic — break cycles with an interface, not a runtime
    workaround.** If two concrete classes would otherwise need each other, introduce an interface
@@ -252,10 +252,10 @@ dotnet build installer/Setup.wixproj
    concrete type — this is the same seam rule 6's constructor-injection convention already creates,
    just framed as a graph property: depending on an abstraction instead of a concretion is what
    keeps the graph from looping back on itself. Verify this mechanically when it matters, not by
-   feel: list every file's `using DeskTools...;` directives (`grep -E "^using DeskTools" -r src/`)
+   feel: list every file's `using Service...;` directives (`grep -E "^using Service" -r src/`)
    and confirm no file is reachable from itself by following them — this now spans a real project
-   boundary too: `src/Base/` (`Base.csproj`) must never reference `DeskTools` (the app's own
-   namespace), since `src/DeskTools/` (`DeskTools.csproj`) already depends on
+   boundary too: `src/Base/` (`Base.csproj`) must never reference `Service` (the app's own
+   namespace), since `src/Service/` (`Service.csproj`) already depends on
    `Base.csproj` the other way. A passing test suite is not
    proof the graph is acyclic, since load-order luck can mask a real cycle. C# doesn't have
    Python's lazy-import escape hatch for masking a cycle at the language level (a circular
@@ -273,7 +273,7 @@ dotnet build installer/Setup.wixproj
     (see `Diagnostics.cs`/`Settings.cs`). A plain process-wide
     `static` field in `src/Base` is only correct for state that's genuinely meant to be shared by
     every client regardless of context (rare, and worth a comment explaining why when it happens) —
-    default to `AsyncLocal` for anything else, even if `src/DeskTools` (typically a
+    default to `AsyncLocal` for anything else, even if `src/Service` (typically a
     single-tenant CLI) never itself exercises the multi-client scenario.
 
     **Known gap, deliberately deferred**: `ConsoleLogSink` still writes straight to the actual OS
@@ -305,7 +305,7 @@ dotnet build installer/Setup.wixproj
 
 ## Logging
 
-- **Use `Logger`** (`DeskTools.Base.Logger` — lives in the `src/Base` project, not the app's
+- **Use `Logger`** (`Service.Base.Logger` — lives in the `src/Base` project, not the app's
   own namespace) — not bare `Console.WriteLine`.
 - **`Console.*` is confined to `Diagnostics.cs`** — the Logger's sink implementations
   (`DiagnosticsLogSink`/`ConsoleLogSink`) are the only place allowed to call

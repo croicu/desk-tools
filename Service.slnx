@@ -1,12 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Base/Base.csproj" />
-    <Project Path="src/DeskTools/DeskTools.csproj" />
+    <Project Path="src/Service/Service.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Base/Base.Tests.csproj" />
     <Project Path="tests/Mocks/Mocks.csproj" />
-    <Project Path="tests/DeskTools/DeskTools.Tests.csproj" />
+    <Project Path="tests/Service/Service.Tests.csproj" />
   </Folder>
   <Project Path="installer/Setup.vcxproj"
     Id="84296b96-0b8a-48e8-ab84-aa02acfdc3db">

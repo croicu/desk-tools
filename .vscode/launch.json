@@ -6,9 +6,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/out/Debug/net10.0/DeskTools.dll",
+      "program": "${workspaceFolder}/out/Debug/net10.0/Service.dll",
       "args": [],
-      "cwd": "${workspaceFolder}/src/DeskTools",
+      "cwd": "${workspaceFolder}/src/Service",
       "console": "integratedTerminal",
       "stopAtEntry": false
     }

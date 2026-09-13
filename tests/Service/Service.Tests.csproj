@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DeskTools\DeskTools.csproj" />
+    <ProjectReference Include="..\..\src\Service\Service.csproj" />
     <ProjectReference Include="..\Mocks\Mocks.csproj" />
   </ItemGroup>
 

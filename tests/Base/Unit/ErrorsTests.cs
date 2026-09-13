@@ -1,6 +1,6 @@
-using DeskTools.Base;
+using Service.Base;
 
-namespace DeskTools.Base.Tests.Unit;
+namespace Service.Base.Tests.Unit;
 
 [TestClass]
 public sealed class ErrorsTests

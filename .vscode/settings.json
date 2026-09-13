@@ -1,5 +1,5 @@
 {
-  "dotnet.defaultSolution": "desk-tools.slnx",
+  "dotnet.defaultSolution": "Service.slnx",
   "editor.formatOnSave": true,
   "omnisharp.enableRoslynAnalyzers": true
 }

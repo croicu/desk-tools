@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace DeskTools.Base;
+namespace Service.Base;
 
 /// <summary>
 /// Layered JSON settings: <c>settings.json</c>'s <c>"settings"</c> object, with

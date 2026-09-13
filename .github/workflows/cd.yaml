@@ -27,7 +27,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Publish
-        run: dotnet publish src/DeskTools -c Release
+        run: dotnet publish src/Service -c Release
 
       - name: Archive
         run: |
@@ -68,4 +68,4 @@ jobs:
         with:
           tag_name: ${{ needs.release-linux.outputs.tag_name }}
           draft: ${{ github.event_name == 'workflow_dispatch' }}
-          files: release/Release/DeskTools.msi
+          files: release/Release/Service.msi

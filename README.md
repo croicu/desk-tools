@@ -13,7 +13,7 @@ dotnet build
 ## Run
 
 ```bash
-dotnet run --project src/DeskTools
+dotnet run --project src/Service
 ```
 
 ## Lint
@@ -26,5 +26,5 @@ dotnet format
 
 ```bash
 dotnet test
-dotnet test --filter "FullyQualifiedName=DeskTools.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
+dotnet test --filter "FullyQualifiedName=Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
 ```

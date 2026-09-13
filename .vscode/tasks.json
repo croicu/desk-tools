@@ -35,7 +35,7 @@
       "label": "publish",
       "type": "shell",
       "dependsOn": "rebuild",
-      "command": "dotnet publish src/DeskTools -c Release -o publish",
+      "command": "dotnet publish src/Service -c Release -o publish",
       "problemMatcher": "$msCompile"
     },
     {

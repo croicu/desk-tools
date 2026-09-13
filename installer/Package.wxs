@@ -1,5 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="DeskTools"
+  <Package Name="Desk Tools"
            Manufacturer="Croicu"
            Version="1.0.0.0"
            UpgradeCode="$(var.UpgradeCode)"
@@ -9,7 +9,7 @@
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLFOLDER" Name="DeskTools">
+      <Directory Id="INSTALLFOLDER" Name="Desk Tools">
         <!-- No explicit Feature/ComponentRef: relies on WiX's default-feature auto-inclusion for
              naked Files, same pattern wixtoolset/wix's own HarvestFiles/Directory.wxs test uses,
              which is enough for a single-feature, files-only installer. -->

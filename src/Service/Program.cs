@@ -1,6 +1,6 @@
-using DeskTools.Base;
+using Service.Base;
 
-namespace DeskTools;
+namespace Service;
 
 public sealed record CliArguments(bool Debug = false);
 

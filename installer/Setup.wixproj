@@ -14,8 +14,8 @@
          WixToolset.Sdk doesn't forward arbitrary MSBuild properties into the compiler on its own. -->
     <DefineConstants>UpgradeCode=$(UpgradeCode)</DefineConstants>
     <!-- TargetName defaults to the project's own file name (Setup): override so the shipped
-         installer is named DeskTools.msi. -->
-    <TargetName>DeskTools</TargetName>
+         installer is named Service.msi. -->
+    <TargetName>Service</TargetName>
     <!-- Repo-root release/<Configuration>/, no Platform segment. WixToolset.Sdk's own default
          would be bin\$(Platform)\$(Configuration)\ under this project's own directory. -->
     <OutputPath>$(MSBuildThisFileDirectory)..\release\$(Configuration)\</OutputPath>
@@ -30,11 +30,11 @@
   <!-- WixToolset.Sdk's ProjectReference Publish="true" doesn't reliably trigger a fresh publish in
        one pass (see https://github.com/orgs/wixtoolset/discussions/8156), so this explicitly shells
        out to `dotnet publish` before the WiX build binds Package.wxs's Files glob against
-       $(AppPublishDir). Framework-dependent + win-x64 so DeskTools.exe is a real native
+       $(AppPublishDir). Framework-dependent + win-x64 so Service.exe is a real native
        Windows apphost (see CLAUDE.md's cross-platform Architecture convention, which this project
        is the deliberate Windows-only exception to, by nature of what an MSI is). -->
   <Target Name="PublishAppForSetup" BeforeTargets="CoreCompile">
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\DeskTools\DeskTools.csproj&quot; -c Release -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Service\Service.csproj&quot; -c Release -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
   </Target>
 
 </Project>

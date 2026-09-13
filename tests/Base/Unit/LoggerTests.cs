@@ -1,7 +1,7 @@
-using DeskTools.Base;
-using DeskTools.Mocks;
+using Service.Base;
+using Service.Mocks;
 
-namespace DeskTools.Base.Tests.Unit;
+namespace Service.Base.Tests.Unit;
 
 /// <summary>
 /// Logger.SetLogger mutates the sink stack, but that stack is now AsyncLocal-scoped (see

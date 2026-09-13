@@ -5,7 +5,7 @@ Modules, data flow, and contracts for `desk-tools`.
 ## Modules
 
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Errors/Interfaces,
-     compiled to its own Base.dll) and src/DeskTools/ (the CLI itself, references
+     compiled to its own Base.dll) and src/Service/ (the CLI itself, references
      Base.csproj): what it owns, what it depends on. -->
 
 Base.dll is designed to be safe inside a service hosting multiple heterogeneous clients in one
