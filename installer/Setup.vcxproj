@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Makefile-type C++ project that just shells out to `dotnet build` on the real Setup.wixproj
+     alongside it. Exists purely so Visual Studio's Solution Explorer can show/trigger the WiX
+     build without needing the WiX Toolset Visual Studio Extension installed: vcxproj is a project
+     type VS understands natively, and a Makefile configuration lets it run an arbitrary command
+     instead of actually invoking the C++ compiler. __project_name__.slnx references this with
+     Build Project="false" (confirmed via `dotnet build __project_name__.slnx`, not just VS's own
+     UI, to actually skip it) so it shows up in Solution Explorer without joining the default
+     build.
+     WiX itself cannot build at all on non-Windows hosts (confirmed empirically: wix.exe prints
+     "The WiX Toolset only supports Windows" and fails outright on Linux), so this must never join
+     the default build path that also needs to run cross-platform (see CLAUDE.md's Architecture
+     convention 11).
+     PlatformToolset below targets VS 2022 (v143) as a broadly-compatible baseline. If your
+     installed Visual Studio reports it can't find this toolset, either retarget the project
+     (right-click it in Solution Explorer > Retarget Projects) or edit PlatformToolset directly to
+     match what you have installed. -->
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <!-- Fresh GUID per instantiation, matching the Id on this project's entry in
+         __project_name__.slnx: see tasks/repo_setup.md's token table. -->
+    <ProjectGuid>{__vcxproj_guid__}</ProjectGuid>
+    <Keyword>MakeFileProj</Keyword>
+    <ProjectName>Setup</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- Overrides vcxproj's default OutDir/IntDir (which would otherwise scatter x64\Debug\
+         folders directly under the project directory). This shim has no real C++ build output
+         of its own, so route its bookkeeping into the already-gitignored bin/obj instead. -->
+    <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>obj\$(Platform)\$(Configuration)\</IntDir>
+    <NMakeBuildCommandLine>dotnet build "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration)</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>dotnet build "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration) --no-incremental</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>dotnet clean "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration)</NMakeCleanCommandLine>
+    <NMakeOutput>$(MSBuildThisFileDirectory)..\release\$(Configuration)\__package_name__.msi</NMakeOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="Setup.wixproj" />
+    <None Include="Package.wxs" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

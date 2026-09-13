@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- Scoped to src/ only (not tests/): keeps the shippable app/library binaries (the app's
+       .exe/.dll, Base.dll, and their .pdb files) together in one place at the repo root instead of
+       scattered across each project's own bin/ folder, while test/mock assemblies stay wherever
+       dotnet test already expects them. -->
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\out\</BaseOutputPath>
+  </PropertyGroup>
+
+</Project>

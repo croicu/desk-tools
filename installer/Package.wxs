@@ -1,0 +1,23 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="__package_name__"
+           Manufacturer="__manufacturer__"
+           Version="1.0.0.0"
+           UpgradeCode="$(var.UpgradeCode)"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="__package_name__">
+        <!-- No explicit Feature/ComponentRef: relies on WiX's default-feature auto-inclusion for
+             naked Files, same pattern wixtoolset/wix's own HarvestFiles/Directory.wxs test uses,
+             which is enough for a single-feature, files-only installer. -->
+        <Files Include="!(bindpath.App)\**">
+          <Exclude Files="!(bindpath.App)\**\*.pdb" />
+        </Files>
+      </Directory>
+    </StandardDirectory>
+
+  </Package>
+</Wix>

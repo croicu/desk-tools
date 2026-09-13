@@ -1,0 +1,19 @@
+# Build artifacts
+bin/
+obj/
+dist/
+/out/
+/release/
+
+# IDE
+.vs/
+*.user
+
+# Test results
+TestResults/
+
+# Claude Code
+.claude/
+
+# Local settings override (personal overrides, not committed)
+settings.local.json

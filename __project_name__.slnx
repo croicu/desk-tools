@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Base/Base.csproj" />
+    <Project Path="src/__package_name__/__package_name__.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Base/Base.Tests.csproj" />
+    <Project Path="tests/Mocks/Mocks.csproj" />
+    <Project Path="tests/__package_name__/__package_name__.Tests.csproj" />
+  </Folder>
+  <Project Path="installer/Setup.vcxproj"
+    Id="__vcxproj_guid__">
+    <Build Project="false" />
+  </Project>
+</Solution>

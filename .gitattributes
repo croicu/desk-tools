@@ -1,0 +1,8 @@
+# Default: keep text files in repo as LF
+* text=auto eol=lf
+
+# Let VS-owned files stay CRLF (VS will rewrite them anyway)
+*.sln      text eol=crlf
+*.slnx     text eol=crlf
+*.csproj   text eol=crlf
+*.user     text eol=crlf

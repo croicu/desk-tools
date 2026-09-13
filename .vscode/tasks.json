@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "dotnet build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "rebuild",
+      "type": "shell",
+      "command": "dotnet clean && dotnet build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "dotnet test",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "format",
+      "type": "shell",
+      "command": "dotnet format",
+      "problemMatcher": []
+    },
+    {
+      "label": "lint",
+      "type": "shell",
+      "command": "dotnet format --verify-no-changes",
+      "problemMatcher": []
+    },
+    {
+      "label": "publish",
+      "type": "shell",
+      "dependsOn": "rebuild",
+      "command": "dotnet publish src/__package_name__ -c Release -o publish",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "zap",
+      "type": "shell",
+      "problemMatcher": [],
+      "windows": {
+        "command": "Get-ChildItem -Recurse -Directory -Include bin,obj,publish | Remove-Item -Recurse -Force; if (Test-Path out) { Remove-Item -Recurse -Force out }"
+      },
+      "linux": {
+        "command": "find . -type d \\( -name bin -o -name obj -o -name publish \\) -prune -exec rm -rf {} +; rm -rf out"
+      },
+      "osx": {
+        "command": "find . -type d \\( -name bin -o -name obj -o -name publish \\) -prune -exec rm -rf {} +; rm -rf out"
+      }
+    }
+  ]
+}
