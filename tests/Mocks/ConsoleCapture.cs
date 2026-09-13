@@ -1,4 +1,4 @@
-namespace Service.Mocks;
+namespace Croicu.Desk.Tools.Mocks;
 
 /// <summary>
 /// Redirects Console.Out for the duration of one action and returns what it wrote. Console.Out is

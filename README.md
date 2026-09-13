@@ -26,5 +26,5 @@ dotnet format
 
 ```bash
 dotnet test
-dotnet test --filter "FullyQualifiedName=Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
+dotnet test --filter "FullyQualifiedName=Croicu.Desk.Tools.Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
 ```
