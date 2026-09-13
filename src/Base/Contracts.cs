@@ -1,4 +1,4 @@
-namespace __package_name__.Base;
+namespace DeskTools.Base;
 
 // Runtime behavioral interfaces (workers, executors) that wire this project's own internals
 // together -- never referenced by external consumers, unlike Interfaces.cs's ILoggingSink. Empty

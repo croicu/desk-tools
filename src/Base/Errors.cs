@@ -1,4 +1,4 @@
-namespace __package_name__.Base;
+namespace DeskTools.Base;
 
 /// <summary>Equivalent of the Python template's <c>telemetry_session()</c> context manager -- flushes
 /// and clears the logger's pending buffer on scope exit. Usage: <c>using var _ = new TelemetrySession();</c></summary>

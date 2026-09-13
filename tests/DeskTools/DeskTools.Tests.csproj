@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\__package_name__\__package_name__.csproj" />
+    <ProjectReference Include="..\..\src\DeskTools\DeskTools.csproj" />
     <ProjectReference Include="..\Mocks\Mocks.csproj" />
   </ItemGroup>
 

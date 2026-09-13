@@ -3,8 +3,8 @@
      alongside it. Exists purely so Visual Studio's Solution Explorer can show/trigger the WiX
      build without needing the WiX Toolset Visual Studio Extension installed: vcxproj is a project
      type VS understands natively, and a Makefile configuration lets it run an arbitrary command
-     instead of actually invoking the C++ compiler. __project_name__.slnx references this with
-     Build Project="false" (confirmed via `dotnet build __project_name__.slnx`, not just VS's own
+     instead of actually invoking the C++ compiler. desk-tools.slnx references this with
+     Build Project="false" (confirmed via `dotnet build desk-tools.slnx`, not just VS's own
      UI, to actually skip it) so it shows up in Solution Explorer without joining the default
      build.
      WiX itself cannot build at all on non-Windows hosts (confirmed empirically: wix.exe prints
@@ -29,8 +29,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <!-- Fresh GUID per instantiation, matching the Id on this project's entry in
-         __project_name__.slnx: see tasks/repo_setup.md's token table. -->
-    <ProjectGuid>{__vcxproj_guid__}</ProjectGuid>
+         desk-tools.slnx: see tasks/repo_setup.md's token table. -->
+    <ProjectGuid>{84296b96-0b8a-48e8-ab84-aa02acfdc3db}</ProjectGuid>
     <Keyword>MakeFileProj</Keyword>
     <ProjectName>Setup</ProjectName>
   </PropertyGroup>
@@ -55,7 +55,7 @@
     <NMakeBuildCommandLine>dotnet build "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration)</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>dotnet build "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration) --no-incremental</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>dotnet clean "$(MSBuildThisFileDirectory)Setup.wixproj" -c $(Configuration)</NMakeCleanCommandLine>
-    <NMakeOutput>$(MSBuildThisFileDirectory)..\release\$(Configuration)\__package_name__.msi</NMakeOutput>
+    <NMakeOutput>$(MSBuildThisFileDirectory)..\release\$(Configuration)\DeskTools.msi</NMakeOutput>
   </PropertyGroup>
   <ItemGroup>
     <None Include="Setup.wixproj" />

@@ -1,4 +1,4 @@
-namespace __package_name__.Mocks;
+namespace DeskTools.Mocks;
 
 /// <summary>
 /// Redirects Console.Out for the duration of one action and returns what it wrote. Console.Out is

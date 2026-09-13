@@ -1,6 +1,6 @@
-using __package_name__.Base;
+using DeskTools.Base;
 
-namespace __package_name__.Mocks;
+namespace DeskTools.Mocks;
 
 /// <summary>
 /// In-memory <see cref="ISettingsProvider"/> fake for tests -- no file I/O, unlike the real

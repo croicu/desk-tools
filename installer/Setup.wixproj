@@ -8,14 +8,14 @@
     <!-- Fresh GUID per instantiation: see tasks/repo_setup.md's token table. Never reuse the
          literal placeholder below: Windows Installer uses UpgradeCode to identify a product
          family for upgrade detection, so two different products sharing one would collide. -->
-    <UpgradeCode>{__upgrade_code__}</UpgradeCode>
+    <UpgradeCode>{20db6e52-e895-490b-8208-ef74d76e901d}</UpgradeCode>
     <AppPublishDir>$(MSBuildThisFileDirectory)obj\publish\</AppPublishDir>
     <!-- Exposes the properties above to Package.wxs as WiX preprocessor variables ($(var.Name)):
          WixToolset.Sdk doesn't forward arbitrary MSBuild properties into the compiler on its own. -->
     <DefineConstants>UpgradeCode=$(UpgradeCode)</DefineConstants>
     <!-- TargetName defaults to the project's own file name (Setup): override so the shipped
-         installer is named __package_name__.msi. -->
-    <TargetName>__package_name__</TargetName>
+         installer is named DeskTools.msi. -->
+    <TargetName>DeskTools</TargetName>
     <!-- Repo-root release/<Configuration>/, no Platform segment. WixToolset.Sdk's own default
          would be bin\$(Platform)\$(Configuration)\ under this project's own directory. -->
     <OutputPath>$(MSBuildThisFileDirectory)..\release\$(Configuration)\</OutputPath>
@@ -30,11 +30,11 @@
   <!-- WixToolset.Sdk's ProjectReference Publish="true" doesn't reliably trigger a fresh publish in
        one pass (see https://github.com/orgs/wixtoolset/discussions/8156), so this explicitly shells
        out to `dotnet publish` before the WiX build binds Package.wxs's Files glob against
-       $(AppPublishDir). Framework-dependent + win-x64 so __package_name__.exe is a real native
+       $(AppPublishDir). Framework-dependent + win-x64 so DeskTools.exe is a real native
        Windows apphost (see CLAUDE.md's cross-platform Architecture convention, which this project
        is the deliberate Windows-only exception to, by nature of what an MSI is). -->
   <Target Name="PublishAppForSetup" BeforeTargets="CoreCompile">
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\__package_name__\__package_name__.csproj&quot; -c Release -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\DeskTools\DeskTools.csproj&quot; -c Release -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
   </Target>
 
 </Project>

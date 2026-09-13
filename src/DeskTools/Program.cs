@@ -1,6 +1,6 @@
-using __package_name__.Base;
+using DeskTools.Base;
 
-namespace __package_name__;
+namespace DeskTools;
 
 public sealed record CliArguments(bool Debug = false);
 
@@ -28,7 +28,7 @@ public static class Program
         }
         catch (AppError error)
         {
-            Logger.Error($"__project_name__: error: {error.Message}");
+            Logger.Error($"desk-tools: error: {error.Message}");
             return 1;
         }
 
@@ -41,8 +41,8 @@ public static class Program
 
         try
         {
-            Logger.Info("__project_name__: started.");
-            Logger.Info("__project_name__: completed.");
+            Logger.Info("desk-tools: started.");
+            Logger.Info("desk-tools: completed.");
             return 0;
         }
         catch (AppError error)
@@ -52,7 +52,7 @@ public static class Program
                 throw;
             }
 
-            Logger.Error($"__project_name__: error: {error.Message}");
+            Logger.Error($"desk-tools: error: {error.Message}");
             return 1;
         }
     }
@@ -74,9 +74,9 @@ public static class Program
             }
             else if (arg is "-h" or "--help")
             {
-                Logger.Print("usage: __project_name__ [--debug]");
+                Logger.Print("usage: desk-tools [--debug]");
                 Logger.Print(string.Empty);
-                Logger.Print("__description__");
+                Logger.Print("Authoring repo for Claude Code MCP servers and tools used by the ecosystem and distributed by desk-organizer. Produces artifacts; does not run them.");
                 Logger.Print(string.Empty);
                 Logger.Print("options:");
                 Logger.Print("  --debug   override settings.json's debug flag");
@@ -85,7 +85,7 @@ public static class Program
             }
             else
             {
-                Logger.Error($"__project_name__: error: unrecognized argument: {arg}");
+                Logger.Error($"desk-tools: error: unrecognized argument: {arg}");
                 Environment.Exit(2);
             }
         }

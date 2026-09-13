@@ -1,7 +1,7 @@
-using __package_name__.Base;
-using __package_name__.Mocks;
+using DeskTools.Base;
+using DeskTools.Mocks;
 
-namespace __package_name__.Base.Tests.Unit;
+namespace DeskTools.Base.Tests.Unit;
 
 /// <summary>
 /// ConsoleLogSink.Create()/Dispose()'s InstanceActive guard is now AsyncLocal-scoped (see

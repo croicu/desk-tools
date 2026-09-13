@@ -1,15 +1,15 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Base/Base.csproj" />
-    <Project Path="src/__package_name__/__package_name__.csproj" />
+    <Project Path="src/DeskTools/DeskTools.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Base/Base.Tests.csproj" />
     <Project Path="tests/Mocks/Mocks.csproj" />
-    <Project Path="tests/__package_name__/__package_name__.Tests.csproj" />
+    <Project Path="tests/DeskTools/DeskTools.Tests.csproj" />
   </Folder>
   <Project Path="installer/Setup.vcxproj"
-    Id="__vcxproj_guid__">
+    Id="84296b96-0b8a-48e8-ab84-aa02acfdc3db">
     <Build Project="false" />
   </Project>
 </Solution>

@@ -1,4 +1,4 @@
-namespace __package_name__.Tests.Unit;
+namespace DeskTools.Tests.Unit;
 
 [TestClass]
 public sealed class ProgramTests
@@ -7,7 +7,7 @@ public sealed class ProgramTests
     public void Main_RunsClean()
     {
         var settingsPath = Path.Combine(AppContext.BaseDirectory, "data", "settings.json");
-        var exitCode = __package_name__.Program.Run(Array.Empty<string>(), settingsPath: settingsPath);
+        var exitCode = DeskTools.Program.Run(Array.Empty<string>(), settingsPath: settingsPath);
         Assert.AreEqual(0, exitCode);
     }
 }

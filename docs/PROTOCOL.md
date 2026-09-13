@@ -1,6 +1,6 @@
 # PROTOCOL.md
 
-CLI signature and file format schemas for `__project_name__`.
+CLI signature and file format schemas for `desk-tools`.
 
 ## CLI
 

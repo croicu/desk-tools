@@ -1,6 +1,6 @@
-using __package_name__.Base;
+using DeskTools.Base;
 
-namespace __package_name__.Base.Tests.Unit;
+namespace DeskTools.Base.Tests.Unit;
 
 [TestClass]
 public sealed class ErrorsTests

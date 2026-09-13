@@ -1,6 +1,6 @@
-using __package_name__.Base;
+using DeskTools.Base;
 
-namespace __package_name__.Base.Tests.Unit;
+namespace DeskTools.Base.Tests.Unit;
 
 /// <summary>
 /// Every test passes explicit path/localPath arguments to Settings.Load()/Section() rather than
