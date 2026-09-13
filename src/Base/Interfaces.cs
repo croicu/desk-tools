@@ -51,4 +51,6 @@ public interface ISettingsProvider
     List<string> LogCategories { get; }
 
     List<string> ExcludedCategories { get; }
+
+    int IdleTimeout { get; }
 }

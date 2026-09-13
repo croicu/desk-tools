@@ -1,6 +1,7 @@
 {
   "settings": {
     "debug": false,
-    "logLevel": "error"
+    "logLevel": "error",
+    "idleTimeout": 1
   }
 }
