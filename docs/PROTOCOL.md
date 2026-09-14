@@ -29,12 +29,15 @@ verified 2026-09-13. Supports protocol version `2025-06-18` only.
 Implements the standard `initialize` -> `initialized` notification -> operation lifecycle
 ([spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)) and:
 
-- `tools/list` -- returns one tool:
-  - `say_hello` -- `inputSchema: {"type":"object","properties":{},"additionalProperties":false}`
-    (no arguments).
+- `tools/list` -- returns two tools, both with
+  `inputSchema: {"type":"object","properties":{},"additionalProperties":false}` (no arguments):
+  - `say_hello`
+  - `stop` -- a graceful, self-terminating shutdown; always advertised (no `settings.debug` gate).
 - `tools/call` -- `say_hello` returns `{"content":[{"type":"text","text":"Hi from MCP"}],"isError":false}`.
-  An unknown tool name is a JSON-RPC `-32602` (Invalid params) error, not a tool-level
-  `isError: true` result.
+  `stop` returns `{"content":[{"type":"text","text":"Stopping."}],"isError":false}` and then exits
+  its read loop the same way EOF-on-stdin would (see `docs/ARCHITECTURE.md`'s `Program.cs` entry) --
+  no further requests on the same connection are handled after it. An unknown tool name is a
+  JSON-RPC `-32602` (Invalid params) error, not a tool-level `isError: true` result.
 
 Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (Parse error) with
 `id: null`. Not yet implemented: `resources`, `prompts`, `listChanged` notifications, pagination --

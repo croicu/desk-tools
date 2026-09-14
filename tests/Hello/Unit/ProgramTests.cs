@@ -99,15 +99,21 @@ public sealed class ProgramTests
     }
 
     [TestMethod]
-    public void Run_ToolsList_ReturnsSayHelloTool()
+    public void Run_ToolsList_ReturnsSayHelloAndStopTools()
     {
         const string request = """{"jsonrpc":"2.0","id":2,"method":"tools/list"}""";
 
         var response = RunSingleRequest(request);
 
         var tools = response.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToList();
-        Assert.HasCount(1, tools);
-        Assert.AreEqual("say_hello", tools[0].GetProperty("name").GetString());
+        var toolNames = new List<string?>();
+        foreach (var tool in tools)
+        {
+            toolNames.Add(tool.GetProperty("name").GetString());
+        }
+
+        Assert.HasCount(2, tools);
+        CollectionAssert.AreEquivalent(new List<string?> { "say_hello", "stop" }, toolNames);
     }
 
     [TestMethod]
@@ -131,6 +137,49 @@ public sealed class ProgramTests
         var response = RunSingleRequest(request);
 
         Assert.AreEqual(-32602, response.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    [TestMethod]
+    public void Run_ToolsCallStop_RespondsSuccessfully()
+    {
+        const string request = """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"stop","arguments":{}}}""";
+
+        var response = RunSingleRequest(request);
+
+        Assert.IsFalse(response.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+    }
+
+    /// <summary>
+    /// The whole point of the stop tool: it must respond first, then stop the read loop the same
+    /// way EOF would -- a request sent after it must never be handled, proving Run() actually broke
+    /// out rather than continuing to read.
+    /// </summary>
+    [TestMethod]
+    public void Run_ToolsCallStop_StopsReadLoopBeforeALaterRequest()
+    {
+        const string input = """
+            {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"stop","arguments":{}}}
+            {"jsonrpc":"2.0","id":10,"method":"tools/list"}
+            """;
+
+        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(input)));
+
+        var lines = new List<string>();
+        using (var reader = new StringReader(output))
+        {
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    lines.Add(line);
+                }
+            }
+        }
+
+        Assert.HasCount(1, lines);
+        var response = JsonDocument.Parse(lines[0]);
+        Assert.AreEqual(9, response.RootElement.GetProperty("id").GetInt32());
     }
 
     [TestMethod]
