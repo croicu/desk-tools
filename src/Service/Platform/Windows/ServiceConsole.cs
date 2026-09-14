@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Croicu.Desk.Tools.Base;
 
 namespace Croicu.Desk.Tools.Service;
 

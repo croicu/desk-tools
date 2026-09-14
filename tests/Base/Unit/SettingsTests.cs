@@ -13,9 +13,9 @@ public sealed class SettingsTests
 {
     /// <summary>
     /// Load()/Section() now log through Logger.Log() on every call (found-and-parsed, missing-file,
-    /// malformed-local-override), which lazily creates Logger's default ConsoleLogSink (see
+    /// malformed-local-override), which lazily creates Logger's default ConsoleLog (see
     /// Diagnostics.cs) if nothing else has already -- same reason ErrorsTests.cs resets, so a
-    /// leftover live default here can't make some other test's own ConsoleLogSink.Create() throw.
+    /// leftover live default here can't make some other test's own ConsoleLog.Create() throw.
     /// </summary>
     [TestCleanup]
     public void Cleanup() => Logger.Reset();
@@ -205,6 +205,76 @@ public sealed class SettingsTests
         try
         {
             Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Distinct from the *-NotArray/InvalidLogLevel tests above (valid JSON, wrong shape) -- this
+    /// is invalid JSON *syntax*, which must also become a SettingsError rather than an unhandled
+    /// JsonException escaping Load().
+    /// </summary>
+    [TestMethod]
+    public void Load_WorkingDirectoryFileNotValidJson_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("not valid json");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_ModulePathFileNotValidJson_ThrowsSettingsError()
+    {
+        var modulePath = WriteTempSettingsFile("not valid json");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: NonExistentPath(), localPath: NonExistentPath(), modulePath: modulePath));
+        }
+        finally
+        {
+            File.Delete(modulePath);
+        }
+    }
+
+    /// <summary>
+    /// Unlike the strict module/working-directory tiers above, an invalid-JSON-syntax
+    /// settings.local.json is logged and ignored, not thrown -- same lenient treatment as a
+    /// valid-JSON-wrong-shape local file (see Load_MalformedLocalSettingsFile_LogsWarningAndIgnoresIt).
+    /// </summary>
+    [TestMethod]
+    public void Load_LocalSettingsFileNotValidJson_LogsWarningAndIgnoresIt()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "info" } }""");
+        var localPath = WriteTempSettingsFile("not valid json");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: localPath, modulePath: NonExistentPath());
+
+            Assert.AreEqual(TelemetryLevel.Info, settings.LogLevel);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(localPath);
+        }
+    }
+
+    [TestMethod]
+    public void Section_WorkingDirectoryFileNotValidJson_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("not valid json");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
         }
         finally
         {

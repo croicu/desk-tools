@@ -1,3 +1,5 @@
+using Croicu.Desk.Tools.Base;
+
 namespace Croicu.Desk.Tools.Service;
 
 // Compiled in whenever RuntimeIdentifier isn't win-x64 or linux-x64 -- notably, when it's unset

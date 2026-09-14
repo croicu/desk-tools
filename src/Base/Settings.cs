@@ -22,7 +22,7 @@ public sealed record Settings : ISettingsProvider
 
     // AsyncLocal rather than a plain static field: scopes "the current settings" to the logical
     // call context (flows across await continuations, doesn't leak into an unrelated concurrent
-    // Load()/Current pair) -- same reasoning as ConsoleLogSink's InstanceActive in Diagnostics.cs.
+    // Load()/Current pair) -- same reasoning as ConsoleLog's InstanceActive in Diagnostics.cs.
     private static readonly AsyncLocal<Settings?> CurrentInstance = new();
 
     public bool Debug { get; }
@@ -208,8 +208,8 @@ public sealed record Settings : ISettingsProvider
 
         if (File.Exists(localPath))
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(localPath));
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+            using var doc = TryParseFile(localPath);
+            if (doc is not null && doc.RootElement.ValueKind == JsonValueKind.Object &&
                 doc.RootElement.TryGetProperty("settings", out var localSettingsEl) &&
                 localSettingsEl.ValueKind == JsonValueKind.Object)
             {
@@ -223,10 +223,10 @@ public sealed record Settings : ISettingsProvider
             else
             {
                 // Unlike a malformed module/working-directory settings.json (which throws), a
-                // malformed settings.local.json is silently ignored by design -- see the
-                // caller-facing shape check above. Silent was the wrong call by itself (a typo'd
-                // override would otherwise vanish with zero signal), so surface it as a Warning
-                // instead of leaving it truly silent.
+                // malformed settings.local.json -- invalid JSON syntax (doc is null, see
+                // TryParseFile) or valid JSON in the wrong shape -- is silently ignored by design.
+                // Silent was the wrong call by itself (a typo'd override would otherwise vanish with
+                // zero signal), so surface it as a Warning instead of leaving it truly silent.
                 Logger.Warning($"local settings file '{localPath}' exists but has no valid 'settings' object; ignoring it.", DiagnosticsCategories.Settings);
             }
         }
@@ -258,7 +258,7 @@ public sealed record Settings : ISettingsProvider
             return false;
         }
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        using var doc = ParseFileStrict(path);
         if (doc.RootElement.ValueKind != JsonValueKind.Object)
         {
             throw new SettingsError($"'{path}' must contain a JSON object.");
@@ -307,8 +307,8 @@ public sealed record Settings : ISettingsProvider
 
         if (File.Exists(localPath))
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(localPath));
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            using var doc = TryParseFile(localPath);
+            if (doc is not null && doc.RootElement.ValueKind == JsonValueKind.Object)
             {
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
@@ -319,6 +319,9 @@ public sealed record Settings : ISettingsProvider
             }
             else
             {
+                // Invalid JSON syntax (doc is null, see TryParseFile) or valid JSON in the wrong
+                // shape -- both silently ignored by design, same reasoning as LoadPayload's own
+                // local-file handling.
                 Logger.Warning($"local settings file '{localPath}' exists but its root is not a JSON object; ignoring it.", DiagnosticsCategories.Settings);
             }
         }
@@ -344,7 +347,7 @@ public sealed record Settings : ISettingsProvider
             return false;
         }
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        using var doc = ParseFileStrict(path);
         if (doc.RootElement.ValueKind != JsonValueKind.Object)
         {
             throw new SettingsError($"'{path}' must contain a JSON object.");
@@ -357,6 +360,43 @@ public sealed record Settings : ISettingsProvider
 
         Logger.Diagnostic($"{tierName} settings file found and parsed: '{path}'", DiagnosticsCategories.Settings);
         return true;
+    }
+
+    /// <summary>
+    /// Parses a file as JSON, returning null (rather than throwing) if it isn't valid JSON syntax --
+    /// used only for the lenient settings.local.json tier, where a malformed file is meant to be
+    /// logged and ignored, not thrown. <see cref="ParseFileStrict"/> is the counterpart for the
+    /// module-dir/working-directory tiers, which are meant to throw instead.
+    /// </summary>
+    private static JsonDocument? TryParseFile(string path)
+    {
+        try
+        {
+            return JsonDocument.Parse(File.ReadAllText(path));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses a file as JSON, converting invalid JSON syntax into a <see cref="SettingsError"/>
+    /// (consistent with the shape-mismatch <see cref="SettingsError"/>s already thrown right after
+    /// each call site) instead of letting the raw <see cref="JsonException"/> propagate unhandled.
+    /// Used only for the strict module-dir/working-directory tiers -- <see cref="TryParseFile"/> is
+    /// the counterpart for the lenient settings.local.json tier.
+    /// </summary>
+    private static JsonDocument ParseFileStrict(string path)
+    {
+        try
+        {
+            return JsonDocument.Parse(File.ReadAllText(path));
+        }
+        catch (JsonException error)
+        {
+            throw new SettingsError($"'{path}' is not valid JSON: {error.Message}");
+        }
     }
 
     private static bool TryParseLevel(string text, out TelemetryLevel level)
