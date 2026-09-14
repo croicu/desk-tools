@@ -5,8 +5,9 @@ Modules, data flow, and contracts for `desk-tools`.
 ## Modules
 
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Errors/Interfaces,
-     compiled to its own Base.dll) and src/Service/ (the CLI itself, references
-     Base.csproj): what it owns, what it depends on. -->
+     compiled to its own Base.dll), src/Service/ (the resident-process CLI, references
+     Base.csproj), and src/Hello/ (a minimal stdio MCP server, references Base.csproj): what it
+     owns, what it depends on. -->
 
 Base.dll is designed to be safe inside a service hosting multiple heterogeneous clients in one
 process, each "renting" its own `ExecutionContext` with independent settings/logging. See
@@ -25,6 +26,14 @@ that exits the process once no connection has been accepted for `Settings.IdleTi
 none is currently in flight. `Program.cs` constructs one and calls `Run()` after settings load.
 Console attach/detach on Windows (`ServiceConsole` under `src/Service/Platform/`) is unrelated prior
 work -- see the `wingui-console-poc` history.
+
+`src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
+`docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
+requests from stdin in a loop until EOF, dispatches `initialize`/`tools/list`/`tools/call`, and
+writes at most one response line per request via `Logger.Print` (never a leveled `Logger.Info`/etc.
+call, since the stdio transport requires stdout to carry only valid MCP messages). Exposes one tool,
+`say_hello`, that returns the text "Hi from MCP". No Settings/persistent state -- everything it needs is a
+handful of `const`s and one static tool definition.
 
 ## Data flow
 

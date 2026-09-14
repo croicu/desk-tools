@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Base/Base.csproj" />
+    <Project Path="src/Hello/Hello.csproj" />
     <Project Path="src/Service/Service.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Base/Base.Tests.csproj" />
+    <Project Path="tests/Hello/Hello.Tests.csproj" />
     <Project Path="tests/Mocks/Mocks.csproj" />
     <Project Path="tests/Service/Service.Tests.csproj" />
   </Folder>
