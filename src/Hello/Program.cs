@@ -9,9 +9,10 @@ namespace Croicu.Desk.Tools.Hello;
 /// Minimal hand-rolled MCP server over stdio -- verified against the spec at
 /// modelcontextprotocol.io/specification/2025-06-18 (basic/lifecycle, basic/transports,
 /// server/tools). Handles just enough of the protocol (initialize, tools/list, tools/call) to
-/// expose one tool, <see cref="SayHelloToolName"/>. No SDK: per-repo direction is to hand-roll
-/// JSON-RPC over this project's own transports rather than depend on the official MCP SDK's
-/// hosting/transport assumptions.
+/// expose two tools: <see cref="SayHelloToolName"/>, and <see cref="StopToolName"/> (a graceful,
+/// self-terminating shutdown -- see its own remarks on <see cref="HandleToolsCall"/>). No SDK:
+/// per-repo direction is to hand-roll JSON-RPC over this project's own transports rather than
+/// depend on the official MCP SDK's hosting/transport assumptions.
 /// </summary>
 public sealed record CliArguments(string? LogDir = null);
 
@@ -19,6 +20,7 @@ public static class Program
 {
     private const string SupportedProtocolVersion = "2025-06-18";
     private const string SayHelloToolName = "say_hello";
+    private const string StopToolName = "stop";
     private const string RequestCategory = "mcp";
 
     private const int ParseErrorCode = -32700;
@@ -32,6 +34,13 @@ public static class Program
     };
 
     private static readonly Dictionary<string, object> SayHelloInputSchema = new()
+    {
+        ["type"] = "object",
+        ["properties"] = new Dictionary<string, object>(),
+        ["additionalProperties"] = false,
+    };
+
+    private static readonly Dictionary<string, object> StopInputSchema = new()
     {
         ["type"] = "object",
         ["properties"] = new Dictionary<string, object>(),
@@ -106,8 +115,9 @@ public static class Program
     /// <summary>
     /// Reads newline-delimited JSON-RPC messages from <paramref name="input"/> (defaults to
     /// Console.In) until it hits EOF (the client closing stdin, per the stdio transport's shutdown
-    /// sequence), dispatching each to a handler and writing at most one response line per request
-    /// (none for notifications).
+    /// sequence) or a <see cref="StopToolName"/> call asks it to stop early (see
+    /// <see cref="HandleToolsCall"/>), dispatching each line to a handler and writing at most one
+    /// response line per request (none for notifications).
     /// </summary>
     public static int Run(TextReader? input = null)
     {
@@ -122,7 +132,10 @@ public static class Program
         {
             if (!string.IsNullOrWhiteSpace(line))
             {
-                HandleLine(line);
+                if (!HandleLine(line))
+                {
+                    break;
+                }
             }
         }
 
@@ -137,8 +150,13 @@ public static class Program
     /// <see cref="Start"/>'s own remarks), and <see cref="Logger.Info"/> -- unlike
     /// <see cref="Logger.Print"/> -- goes through each sink's normal <c>Log()</c> path, which the
     /// silent placeholder <see cref="DiagnosticsLog"/> sink never presents.
+    ///
+    /// Returns whether <see cref="Run"/>'s read loop should keep going -- false only once a
+    /// <see cref="StopToolName"/> call has already written its response (see
+    /// <see cref="HandleToolsCall"/>), so the loop breaks the same way it would on EOF, not via an
+    /// abrupt <see cref="Environment.Exit(int)"/> that could cut off output mid-flush.
     /// </summary>
-    private static void HandleLine(string line)
+    private static bool HandleLine(string line)
     {
         Logger.Info($"hello: received request: {line}", RequestCategory);
 
@@ -150,7 +168,7 @@ public static class Program
         catch (JsonException)
         {
             WriteError(id: null, ParseErrorCode, "Parse error");
-            return;
+            return true;
         }
 
         using (doc)
@@ -165,14 +183,14 @@ public static class Program
                     WriteError(idElement, InvalidRequestCode, "Invalid request: 'method' is required.");
                 }
 
-                return;
+                return true;
             }
 
             if (!hasId)
             {
                 // A notification (e.g. notifications/initialized) -- consumed, no response ever
                 // sent, regardless of which method it names.
-                return;
+                return true;
             }
 
             var method = methodElement.GetString() ?? string.Empty;
@@ -184,16 +202,15 @@ public static class Program
                 {
                     case "initialize":
                         HandleInitialize(idElement);
-                        break;
+                        return true;
                     case "tools/list":
                         HandleToolsList(idElement);
-                        break;
+                        return true;
                     case "tools/call":
-                        HandleToolsCall(idElement, paramsElement);
-                        break;
+                        return HandleToolsCall(idElement, paramsElement);
                     default:
                         WriteError(idElement, MethodNotFoundCode, $"Method not found: {method}");
-                        break;
+                        return true;
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -202,6 +219,7 @@ public static class Program
                 // stdin is a system boundary (arbitrary client input), so this is exactly the kind
                 // of edge the repo's error-handling guidance says is worth guarding.
                 WriteError(idElement, -32603, $"Internal error: {error.Message}");
+                return true;
             }
         }
     }
@@ -218,36 +236,55 @@ public static class Program
 
     private static void HandleToolsList(JsonElement id)
     {
-        var tool = new ToolDefinition(
+        var sayHelloTool = new ToolDefinition(
             Name: SayHelloToolName,
             Description: "Prints a friendly greeting.",
             InputSchema: SayHelloInputSchema);
 
-        WriteResult(id, new ToolsListResult(Tools: [tool]));
+        var stopTool = new ToolDefinition(
+            Name: StopToolName,
+            Description: "Stops this hello MCP server process gracefully (responds, then exits its "
+                + "read loop and returns normally, releasing any file locks it held). Only call this "
+                + "when explicitly asked to stop/restart the server -- never in response to an "
+                + "unrelated user message that happens to mention stopping something else.",
+            InputSchema: StopInputSchema);
+
+        WriteResult(id, new ToolsListResult(Tools: [sayHelloTool, stopTool]));
     }
 
-    private static void HandleToolsCall(JsonElement id, JsonElement paramsElement)
+    /// <summary>
+    /// Returns whether <see cref="Run"/>'s read loop should keep going -- see
+    /// <see cref="HandleLine"/>'s own remarks. Only <see cref="StopToolName"/> returns false, and
+    /// only after its own response has already been written, so the client always gets a normal
+    /// tools/call result for the stop request itself before the process actually stops reading.
+    /// </summary>
+    private static bool HandleToolsCall(JsonElement id, JsonElement paramsElement)
     {
         if (paramsElement.ValueKind != JsonValueKind.Object ||
             !paramsElement.TryGetProperty("name", out var nameElement) ||
             nameElement.ValueKind != JsonValueKind.String)
         {
             WriteError(id, InvalidParamsCode, "Invalid params: 'name' is required.");
-            return;
+            return true;
         }
 
         var name = nameElement.GetString() ?? string.Empty;
-        if (name != SayHelloToolName)
+        switch (name)
         {
-            WriteError(id, InvalidParamsCode, $"Unknown tool: {name}");
-            return;
+            case SayHelloToolName:
+                WriteResult(id, new ToolCallResult(
+                    Content: [new TextContent(Type: "text", Text: "Hi from MCP")],
+                    IsError: false));
+                return true;
+            case StopToolName:
+                WriteResult(id, new ToolCallResult(
+                    Content: [new TextContent(Type: "text", Text: "Stopping.")],
+                    IsError: false));
+                return false;
+            default:
+                WriteError(id, InvalidParamsCode, $"Unknown tool: {name}");
+                return true;
         }
-
-        var result = new ToolCallResult(
-            Content: [new TextContent(Type: "text", Text: "Hi from MCP")],
-            IsError: false);
-
-        WriteResult(id, result);
     }
 
     private static void WriteResult(JsonElement id, object result)

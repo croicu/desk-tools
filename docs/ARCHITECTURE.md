@@ -96,11 +96,18 @@ Console attach/detach on Windows (`ServiceConsole` under `src/Service/Platform/`
 
 `src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
 `docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
-requests from stdin in a loop until EOF, dispatches `initialize`/`tools/list`/`tools/call`, and
-writes at most one response line per request via `Logger.Print` (never a leveled `Logger.Info`/etc.
-call, since the stdio transport requires stdout to carry only valid MCP messages). Exposes one tool,
-`say_hello`, that returns the text "Hi from MCP". No Settings/persistent state -- everything it needs is a
-handful of `const`s and one static tool definition. Parses one CLI flag of its own, `--log <dir>`
+requests from stdin in a loop until EOF (or a `stop` tool call, below) ends it, dispatches
+`initialize`/`tools/list`/`tools/call`, and writes at most one response line per request via
+`Logger.Print` (never a leveled `Logger.Info`/etc. call, since the stdio transport requires stdout
+to carry only valid MCP messages). Exposes two tools: `say_hello`, which returns the text "Hi from
+MCP"; and `stop`, a graceful shutdown -- `HandleLine`/`HandleToolsCall` return a `bool` ("keep
+reading?") up through the dispatch chain specifically so `stop`'s handler can write its own response
+first, then have `Run`'s read loop break the same way it would on EOF, rather than an abrupt
+`Environment.Exit` that could cut output off mid-flush. Exists so a dev loop rebuilding `Hello.dll`
+can ask a locally-running instance to release its file lock via a normal `tools/call` instead of an
+external process kill -- see the `stop-hello` skill under `.claude/skills/`. No Settings/persistent
+state -- everything it needs is a handful of `const`s and two static tool definitions. Parses one
+CLI flag of its own, `--log <dir>`
 (see `docs/PROTOCOL.md`), since a stdio server that can never print to its own console needs a
 `FileLog` file as its one way to be debugged after the fact.
 

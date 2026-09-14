@@ -17,8 +17,9 @@ dist/
 # Test results
 TestResults/
 
-# Claude Code
-.claude/
+# Claude Code (local settings/history stay ignored; skills are shared with the repo)
+.claude/*
+!.claude/skills/
 
 # Local settings override (personal overrides, not committed)
 settings.local.json
