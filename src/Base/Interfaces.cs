@@ -9,13 +9,13 @@ namespace Croicu.Desk.Tools.Base;
 /// Injectable logging contract -- if this project is ever consumed as a library by another
 /// project (rather than run standalone), the host application can pass its own logger into your
 /// public constructors/factories and you write through it instead of your own private Logger.
-/// Mirrors <see cref="DiagnosticsLogSink"/>'s method surface.
+/// Mirrors <see cref="DiagnosticsLog"/>'s method surface.
 ///
 /// Note the language gap from the Python template this was ported from: Python's typing.Protocol
-/// is structural, so DiagnosticsLogSink satisfied LoggingSink automatically with zero declaration
-/// needed. A C# interface is nominal instead -- DiagnosticsLogSink has to explicitly declare
-/// <c>: ILoggingSink</c> (see Diagnostics.cs) to satisfy this contract. Once declared, callers see
-/// the same "no glue code needed" behavior the Python version had.
+/// is structural, so DiagnosticsLog satisfied LoggingSink automatically with zero declaration
+/// needed. A C# interface is nominal instead -- DiagnosticsLog has to explicitly declare
+/// <c>: ILoggingSink</c> (see Sinks/DiagnosticsLog.cs) to satisfy this contract. Once declared,
+/// callers see the same "no glue code needed" behavior the Python version had.
 ///
 /// category defaults to the literal "general" here (not DiagnosticsCategories.General) so this
 /// file has no outgoing dependency on Diagnostics.cs -- see Architecture convention 9 (acyclic
@@ -53,4 +53,19 @@ public interface ISettingsProvider
     List<string> ExcludedCategories { get; }
 
     int IdleTimeout { get; }
+}
+
+/// <summary>
+/// Injectable console-lifecycle contract -- lets a host supply its own platform-specific
+/// console-attach behavior (e.g. Service's <c>ServiceConsole</c> under <c>src/Service/Platform/</c>,
+/// best-effort <c>AttachConsole</c> on Windows, no-op elsewhere) to <see cref="Context.Start"/>
+/// without <c>src/Base</c> ever referencing a consuming app's own namespace -- Architecture
+/// convention 9. <see cref="EnsureConsole"/> is called before anything that might log;
+/// <see cref="ReleaseConsole"/> always runs afterward, even on failure.
+/// </summary>
+public interface IConsole
+{
+    void EnsureConsole();
+
+    void ReleaseConsole();
 }

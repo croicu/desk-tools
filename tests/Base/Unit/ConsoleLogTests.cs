@@ -1,35 +1,36 @@
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Base.Sinks;
 using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
-/// ConsoleLogSink.Create()/Dispose()'s InstanceActive guard is now AsyncLocal-scoped (see
+/// ConsoleLog.Create()/Dispose()'s InstanceActive guard is now AsyncLocal-scoped (see
 /// Diagnostics.cs), so it's no longer the reason this class avoids parallelism -- every test here
 /// still redirects Console.Out/Error, though, which is a genuinely process-wide BCL property with
 /// no per-context equivalent, so the class stays sequential to avoid two tests' captures racing.
 /// </summary>
 [TestClass]
 [DoNotParallelize]
-public sealed class ConsoleLogSinkTests
+public sealed class ConsoleLogTests
 {
     [TestMethod]
     public void Create_GuardsAgainstMultipleLiveInstances()
     {
-        var sink1 = ConsoleLogSink.Create();
+        var sink1 = ConsoleLog.Create();
 
-        Assert.ThrowsExactly<InvalidOperationException>(() => ConsoleLogSink.Create());
+        Assert.ThrowsExactly<InvalidOperationException>(() => ConsoleLog.Create());
 
         sink1.Dispose();
 
-        var sink2 = ConsoleLogSink.Create();
+        var sink2 = ConsoleLog.Create();
         sink2.Dispose();
     }
 
     [TestMethod]
     public void Log_BelowMinLevel_DoesNotPrint()
     {
-        var sink = ConsoleLogSink.Create(minLevel: TelemetryLevel.Warning);
+        var sink = ConsoleLog.Create(minLevel: TelemetryLevel.Warning);
         try
         {
             var output = ConsoleCapture.CaptureOut(() => sink.Log(TelemetryLevel.Info, "quiet"));
@@ -44,7 +45,7 @@ public sealed class ConsoleLogSinkTests
     [TestMethod]
     public void Log_AtOrAboveMinLevel_Prints()
     {
-        var sink = ConsoleLogSink.Create(minLevel: TelemetryLevel.Warning);
+        var sink = ConsoleLog.Create(minLevel: TelemetryLevel.Warning);
         try
         {
             var output = ConsoleCapture.CaptureOut(() => sink.Log(TelemetryLevel.Warning, "heads up", "mycat"));
@@ -59,7 +60,7 @@ public sealed class ConsoleLogSinkTests
     [TestMethod]
     public void Log_ExplicitCategoryAllowList_FiltersUnlistedCategories()
     {
-        var sink = ConsoleLogSink.Create(minLevel: TelemetryLevel.Verbose, categories: new List<string> { "allowed" });
+        var sink = ConsoleLog.Create(minLevel: TelemetryLevel.Verbose, categories: new List<string> { "allowed" });
         try
         {
             var output = ConsoleCapture.CaptureOut(() =>
@@ -80,7 +81,7 @@ public sealed class ConsoleLogSinkTests
     [TestMethod]
     public void Log_UnfilteredWithExcludedCategories_ActsAsDenyList()
     {
-        var sink = ConsoleLogSink.Create(minLevel: TelemetryLevel.Verbose, excludedCategories: new List<string> { "noisy" });
+        var sink = ConsoleLog.Create(minLevel: TelemetryLevel.Verbose, excludedCategories: new List<string> { "noisy" });
         try
         {
             var output = ConsoleCapture.CaptureOut(() =>
@@ -101,7 +102,7 @@ public sealed class ConsoleLogSinkTests
     [TestMethod]
     public void Configure_UpdatesFilteringInPlace()
     {
-        var sink = ConsoleLogSink.Create(minLevel: TelemetryLevel.Error);
+        var sink = ConsoleLog.Create(minLevel: TelemetryLevel.Error);
         try
         {
             var beforeOutput = ConsoleCapture.CaptureOut(() => sink.Log(TelemetryLevel.Info, "still quiet"));

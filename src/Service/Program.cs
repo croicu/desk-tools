@@ -6,71 +6,34 @@ public sealed record CliArguments(bool Debug = false);
 
 public static class Program
 {
-    public static int Main(string[] args) => Run(args);
+    public static int Main(string[] args) => Start(args);
 
     /// <summary>
     /// Testable entry point -- Main() just forwards here. settingsPath lets a test point at a
     /// fixture file instead of the real ./settings.json (see the Python template's
-    /// test_main_runs_clean for the pattern this mirrors).
+    /// test_main_runs_clean for the pattern this mirrors). Not named Main itself: a Main with extra
+    /// parameters beyond <c>string[] args</c> -- even optional ones -- isn't recognized as a valid
+    /// CLR entry point at all (CS5001), so the settingsPath test hook has to live on a differently
+    /// named method. Everything else -- console lifecycle, settings loading, Logger wiring,
+    /// AppError-to-exit-code translation -- is <see cref="Context.Start"/>'s job (called from within
+    /// here, hence the shared name -- always reached qualified as <c>Context.Start</c>, so no
+    /// ambiguity with this method); this is just the app-specific pieces it can't own (CLI parsing,
+    /// naming itself for Start's error-logging prefix) plus passing <see cref="Run"/> as the run
+    /// body.
     /// </summary>
-    public static int Run(string[]? argv = null, string? settingsPath = null)
+    internal static int Start(string[]? argv = null, string? settingsPath = null)
     {
-        var console = new ServiceConsole();
+        var arguments = ParseArgs(argv ?? []);
 
-        // Must run before anything below that can write to the console (ParseArgs' --help text,
-        // Settings.Load's error path) -- on a WinExe launch with no console ancestor, nothing
-        // written before this runs would be visible at all.
-        console.EnsureConsole();
+        return Context.Start(new ServiceConsole(), "desk-tools", settingsPath, arguments.Debug, Run);
+    }
 
-        try
-        {
-            // No explicit sink setup needed: Logger's default sink is already a live ConsoleLogSink
-            // with safe bootstrap settings (see Diagnostics.cs), so anything logged before settings
-            // are read -- a CLI-parsing error, a malformed settings.json -- is actually printed
-            // already; ConfigureConsole below just narrows it to the real level/categories once
-            // settings load.
-            var arguments = ParseArgs(argv ?? Array.Empty<string>());
-
-            Settings settings;
-            try
-            {
-                settings = settingsPath is null ? Settings.Load() : Settings.Load(path: settingsPath);
-            }
-            catch (AppError error)
-            {
-                Logger.Error($"desk-tools: error: {error.Message}");
-                return 1;
-            }
-
-            Logger.ConfigureConsole(
-                minLevel: settings.LogLevel,
-                categories: settings.LogCategories,
-                excludedCategories: settings.ExcludedCategories);
-
-            var debug = settings.Debug || arguments.Debug;
-
-            try
-            {
-                Logger.Info("desk-tools: started.");
-                new Host(settings).Run();
-                Logger.Info("desk-tools: completed.");
-                return 0;
-            }
-            catch (AppError error)
-            {
-                if (debug)
-                {
-                    throw;
-                }
-
-                Logger.Error($"desk-tools: error: {error.Message}");
-                return 1;
-            }
-        }
-        finally
-        {
-            console.ReleaseConsole();
-        }
+    public static int Run()
+    {
+        Logger.Info("desk-tools: started.");
+        new Host(Settings.Current).Run();
+        Logger.Info("desk-tools: completed.");
+        return 0;
     }
 
     /// <summary>

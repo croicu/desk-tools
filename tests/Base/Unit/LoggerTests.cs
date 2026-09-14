@@ -1,4 +1,5 @@
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Base.Sinks;
 using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
@@ -13,8 +14,8 @@ public sealed class LoggerTests
 {
     /// <summary>
     /// Every call here that doesn't push its own sink lazily creates Logger's default
-    /// ConsoleLogSink (see Diagnostics.cs), which nothing here ever disposes -- reset after each
-    /// test so a leftover live default can't make some other test's own ConsoleLogSink.Create()
+    /// ConsoleLog (see Diagnostics.cs), which nothing here ever disposes -- reset after each
+    /// test so a leftover live default can't make some other test's own ConsoleLog.Create()
     /// throw, regardless of whether the test runner happens to reuse this logical call context.
     /// </summary>
     [TestCleanup]
@@ -39,7 +40,7 @@ public sealed class LoggerTests
     }
 
     /// <summary>
-    /// Proves Logger works with zero setup -- no ConsoleLogSink.Create()/SetLogger()/
+    /// Proves Logger works with zero setup -- no ConsoleLog.Create()/SetLogger()/
     /// ConfigureConsole() call required to get correct output at the bootstrap defaults (Error
     /// shows, Info/Warning are suppressed, categories are unfiltered so any category can show).
     /// Redirects Console.Out, which is process-wide with no per-context equivalent, so this one
@@ -63,18 +64,18 @@ public sealed class LoggerTests
 
     /// <summary>
     /// Calling SetLogger before anything else touches Logger in this context should install
-    /// `sink` directly, not lazily create the default ConsoleLogSink first and shadow it -- if the
-    /// default had been created too, it would still hold ConsoleLogSink's guard, and the
+    /// `sink` directly, not lazily create the default ConsoleLog first and shadow it -- if the
+    /// default had been created too, it would still hold ConsoleLog's guard, and the
     /// Create() call below would throw.
     /// </summary>
     [TestMethod]
-    public void SetLogger_AsFirstCall_DoesNotCreateDefaultConsoleLogSink()
+    public void SetLogger_AsFirstCall_DoesNotCreateDefaultConsoleLog()
     {
         var sink = new RecordingSink();
         Logger.SetLogger(sink);
         try
         {
-            var consoleSink = ConsoleLogSink.Create();
+            var consoleSink = ConsoleLog.Create();
             consoleSink.Dispose();
         }
         finally
@@ -198,7 +199,145 @@ public sealed class LoggerTests
         Assert.AreEqual("duration: 0.500s - network call", sink.Received[0].Message);
     }
 
-    private sealed class RecordingSink : DiagnosticsLogSink
+    [TestMethod]
+    public void MultipleSinks_AllReceiveEachLogCall()
+    {
+        var sink1 = new RecordingSink();
+        var sink2 = new RecordingSink();
+        Logger.SetLogger(sink1);
+        Logger.SetLogger(sink2);
+        try
+        {
+            Logger.Info("hello", "cat");
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+
+        Assert.HasCount(1, sink1.Received);
+        Assert.HasCount(1, sink2.Received);
+        Assert.AreEqual("hello", sink1.Received[0].Message);
+        Assert.AreEqual("hello", sink2.Received[0].Message);
+    }
+
+    [TestMethod]
+    public void MultipleSinks_InvokedSequentiallyInRegistrationOrder()
+    {
+        var order = new List<string>();
+        var sink1 = new OrderTrackingSink("first", order);
+        var sink2 = new OrderTrackingSink("second", order);
+        Logger.SetLogger(sink1);
+        Logger.SetLogger(sink2);
+        try
+        {
+            Logger.Info("hello");
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+
+        CollectionAssert.AreEqual(new List<string> { "first", "second" }, order);
+    }
+
+    [TestMethod]
+    public void Log_WithMultipleSinks_ReturnsFirstRegisteredSinksRecord()
+    {
+        var sink1 = new RecordingSink();
+        var sink2 = new RecordingSink();
+        Logger.SetLogger(sink1);
+        Logger.SetLogger(sink2);
+        try
+        {
+            var record = Logger.Log(TelemetryLevel.Warning, "hello", "cat");
+
+            Assert.AreSame(sink1.Received[0], record);
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+    }
+
+    [TestMethod]
+    public void Drain_WithMultipleSinks_ConcatenatesEachSinksOwnMessages()
+    {
+        var sink1 = new RecordingSink();
+        var sink2 = new RecordingSink();
+        Logger.SetLogger(sink1);
+        Logger.SetLogger(sink2);
+        try
+        {
+            Logger.Info("hello");
+
+            var messages = Logger.Drain();
+
+            CollectionAssert.AreEqual(new List<string> { "hello", "hello" }, messages);
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+    }
+
+    [TestMethod]
+    public void Clear_WithMultipleSinks_ClearsEachSinksOwnBufferIndependently()
+    {
+        var sink1 = new RecordingSink();
+        var sink2 = new RecordingSink();
+        Logger.SetLogger(sink1);
+        Logger.SetLogger(sink2);
+        try
+        {
+            Logger.Info("hello");
+            Logger.Clear();
+
+            Assert.IsEmpty(Logger.Drain());
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+    }
+
+    /// <summary>
+    /// Regression test for a real bug caught via a live smoke test of Hello with settings.debug=true:
+    /// DebugLog didn't override Print(), so it inherited DiagnosticsLog's write-straight-to-Console
+    /// behavior -- meaning Logger.Print() with a ConsoleLog and a DebugLog both active (the normal
+    /// debug-mode shape) wrote the same text to stdout twice. Redirects Console.Out, which is
+    /// process-wide, so this can't run in parallel with anything else that also does.
+    /// </summary>
+    [TestMethod]
+    [DoNotParallelize]
+    public void Print_WithConsoleAndDebugSinksBothActive_WritesToConsoleExactlyOnce()
+    {
+        var consoleSink = ConsoleLog.Create();
+        var debugWritten = new List<string>();
+        var debugSink = DebugLog.Create(debugWritten.Add);
+        Logger.SetLogger(consoleSink);
+        Logger.SetLogger(debugSink);
+        try
+        {
+            var output = ConsoleCapture.CaptureOut(() => Logger.Print("usage: desk-tools [--debug]"));
+
+            Assert.AreEqual("usage: desk-tools [--debug]" + Environment.NewLine, output);
+            Assert.HasCount(1, debugWritten);
+            Assert.AreEqual("usage: desk-tools [--debug]", debugWritten[0]);
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+            Logger.SetLogger(null);
+        }
+    }
+
+    private sealed class RecordingSink : DiagnosticsLog
     {
         public List<TelemetryRecord> Received { get; } = new();
 
@@ -207,6 +346,24 @@ public sealed class LoggerTests
             var record = base.Log(level, message, category);
             Received.Add(record);
             return record;
+        }
+    }
+
+    private sealed class OrderTrackingSink : DiagnosticsLog
+    {
+        private readonly string _name;
+        private readonly List<string> _order;
+
+        public OrderTrackingSink(string name, List<string> order)
+        {
+            _name = name;
+            _order = order;
+        }
+
+        public override TelemetryRecord Log(TelemetryLevel level, string message, string category = DiagnosticsCategories.General)
+        {
+            _order.Add(_name);
+            return base.Log(level, message, category);
         }
     }
 }

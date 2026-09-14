@@ -215,7 +215,7 @@ dotnet build installer/Setup.wixproj
    describe. Behavior that merely *operates on* a data contract still belongs in a dedicated
    entity/service class, not on the record/class itself. Keep any behavioral interface placed here
    leaf-safe (convention 8) — default parameter values like a category string should be literals,
-   not references to constants in `Diagnostics.cs`, even where `Diagnostics.cs` already defines the
+   not references to constants in `Logger.cs`, even where `Logger.cs` already defines the
    same constant.
 3. `Contracts.cs` contains runtime behavioral interfaces (for things like workers/executors) that
    wire this project's *own* internals together — never referenced by external consumers, unlike
@@ -268,21 +268,24 @@ dotnet build installer/Setup.wixproj
     `ExecutionContext` — can be live at the same time, each with its own settings and logging
     configuration, none of them able to see or disturb another's. Concretely: never add plain
     `static` mutable state to `src/Base` for anything that legitimately differs per client (a sink
-    instance, its configured level/categories, a pending-records buffer, "the current settings") —
-    scope it with `AsyncLocal<T>` instead, the way `Logger`'s sink stack, `DiagnosticsLogSink`'s
-    pending buffer, `ConsoleLogSink`'s `InstanceActive` guard, and `Settings.Current` all already do
-    (see `Diagnostics.cs`/`Settings.cs`). A plain process-wide
+    list, a sink's configured level/categories, "the current settings") — scope it with
+    `AsyncLocal<T>` instead, the way `Logger`'s sink list, `ConsoleLog`'s/`DebugLog`'s
+    `InstanceActive` guards, and `Settings.Current`/`Context.Current` all already do (see
+    `Logger.cs`/`Sinks/`/`Settings.cs`/`Context.cs`) — each sink's own pending buffer (used by
+    `Flush`/`Clear`/`Drain`) is plain per-instance state rather than `AsyncLocal` itself, since
+    instance-scoping is already enough once the *list* holding those instances is `AsyncLocal` and
+    a sink instance is never shared across clients. A plain process-wide
     `static` field in `src/Base` is only correct for state that's genuinely meant to be shared by
     every client regardless of context (rare, and worth a comment explaining why when it happens) —
     default to `AsyncLocal` for anything else, even if `src/Service` (typically a
     single-tenant CLI) never itself exercises the multi-client scenario.
 
-    **Known gap, deliberately deferred**: `ConsoleLogSink` still writes straight to the actual OS
+    **Known gap, deliberately deferred**: `ConsoleLog` still writes straight to the actual OS
     console (under `ConsoleLock`) from whichever client's context is logging — correct (no
     interleaved/corrupted output, since every write is serialized through that lock) but not the
     same as giving the console a single owning thread, which a real multi-client *server* host would
     likely want. The intended eventual shape: an `IConsoleWriter` seam injected into
-    `ConsoleLogSink` (default implementation: write straight to `Console`, today's behavior; this is
+    `ConsoleLog` (default implementation: write straight to `Console`, today's behavior; this is
     the "rare, genuinely shared" exception noted above, since the queue feeding a real console has
     to be one real shared instance handed to every client's sink, not `AsyncLocal`), with an
     alternative implementation that enqueues formatted lines for a designated main thread to drain
@@ -308,8 +311,8 @@ dotnet build installer/Setup.wixproj
 
 - **Use `Logger`** (`Croicu.Desk.Tools.Base.Logger` — lives in the `src/Base` project, not
   the app's own namespace) — not bare `Console.WriteLine`.
-- **`Console.*` is confined to `Diagnostics.cs`** — the Logger's sink implementations
-  (`DiagnosticsLogSink`/`ConsoleLogSink`) are the only place allowed to call
+- **`Console.*` is confined to `src/Base/Sinks/`** — the Logger's sink implementations
+  (`DiagnosticsLog`/`ConsoleLog`) are the only place allowed to call
   `Console.Write`/`Console.WriteLine`/`Console.Error.WriteLine` directly; everywhere else
   (`Program.cs`, etc.) must go through `Logger`, since the Logger owns the console. Install a sink
   (`Logger.SetLogger(...)`) as the very first thing `Main`/`Run` does, before anything that might
@@ -347,7 +350,7 @@ dotnet build installer/Setup.wixproj
     to the host via the injectable `ILoggingSink` interface (see `Interfaces.cs` and the "Explicit
     DI First" rule under Coding Style) rather than a bridge onto `Microsoft.Extensions.Logging`.
 - **Categories** — every `Logger` method takes an optional `category = "general"`, filterable via
-  `settings.json`'s `logCategories` (an open string, not a closed enum — `Diagnostics.cs` only
+  `settings.json`'s `logCategories` (an open string, not a closed enum — `Logger.cs` only
   defines `DiagnosticsCategories.General` as a starting constant). Console output is
   `[LEVEL][category] message`. **Effective default depends on whether `logLevel` is explicit** (see
   "Specific settings override generic ones on scope overlap" under Coding Style — this is that

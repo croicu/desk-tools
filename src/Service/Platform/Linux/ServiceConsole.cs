@@ -1,3 +1,5 @@
+using Croicu.Desk.Tools.Base;
+
 namespace Croicu.Desk.Tools.Service;
 
 // Mirrors Platform/Windows/ServiceConsole.cs's class name so Program.cs's call site needs no

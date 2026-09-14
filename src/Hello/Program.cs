@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Base.Sinks;
 
 namespace Croicu.Desk.Tools.Hello;
 
@@ -34,13 +35,39 @@ public static class Program
         ["additionalProperties"] = false,
     };
 
-    public static int Main(string[] args) => Run();
+    public static int Main(string[] args) => Start();
 
     /// <summary>
-    /// Testable entry point -- Main() just forwards here. Reads newline-delimited JSON-RPC
-    /// messages from <paramref name="input"/> (defaults to Console.In) until it hits EOF (the
-    /// client closing stdin, per the stdio transport's shutdown sequence), dispatching each to a
-    /// handler and writing at most one response line per request (none for notifications).
+    /// Testable entry point -- Main() just forwards here. settingsPath lets a test point at a
+    /// fixture file instead of the real ./settings.json (same convention as Service's Program.cs).
+    ///
+    /// Installs a silent <see cref="DiagnosticsLog"/> sink before anything else can log --
+    /// specifically before <see cref="Context.Start"/>'s internal <see cref="Settings.Load"/> call,
+    /// which emits its own <c>Logger.Diagnostic</c>/<c>Warning</c>/<c>Info</c> calls as part of
+    /// normal operation. Those would otherwise reach <c>Logger</c>'s lazily-created default
+    /// <see cref="ConsoleLog"/> sink and print straight to stdout, corrupting the MCP protocol
+    /// stream (see the class doc comment: stdout must carry only valid MCP messages).
+    /// <see cref="DiagnosticsLog"/>'s own <c>Log()</c> is a pure no-op for presentation (records to
+    /// its pending buffer only, never prints), while <c>Print()</c> -- used for the actual protocol
+    /// response lines in <see cref="WriteResult"/>/<see cref="WriteError"/> -- is defined on that
+    /// same base class and writes unconditionally regardless of which sink is active, so it still
+    /// works correctly here. No <see cref="IConsole"/> lifecycle concerns of its own (unlike
+    /// Service, this is a plain stdio server, never a hidden-subsystem Windows app), hence
+    /// <see cref="NoOpConsole"/>; no CLI args to derive a debug override from, hence the literal
+    /// <c>false</c> -- <c>settings.debug</c> alone still drives it if set.
+    /// </summary>
+    internal static int Start(string? settingsPath = null)
+    {
+        Logger.SetLogger(new DiagnosticsLog());
+
+        return Context.Start(new NoOpConsole(), "hello", settingsPath, debugOverride: false, () => Run());
+    }
+
+    /// <summary>
+    /// Reads newline-delimited JSON-RPC messages from <paramref name="input"/> (defaults to
+    /// Console.In) until it hits EOF (the client closing stdin, per the stdio transport's shutdown
+    /// sequence), dispatching each to a handler and writing at most one response line per request
+    /// (none for notifications).
     /// </summary>
     public static int Run(TextReader? input = null)
     {
