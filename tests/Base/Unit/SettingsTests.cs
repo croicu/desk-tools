@@ -30,6 +30,37 @@ public sealed class SettingsTests
         CollectionAssert.AreEqual(new List<string> { DiagnosticsCategories.General }, settings.LogCategories);
         Assert.IsEmpty(settings.ExcludedCategories);
         Assert.AreEqual(600, settings.IdleTimeout);
+        Assert.IsNull(settings.LogDir);
+    }
+
+    [TestMethod]
+    public void Load_ExplicitLogDir_UsesConfiguredValue()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "logDir": "/var/log/desk-tools" } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.AreEqual("/var/log/desk-tools", settings.LogDir);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_LogDirNotString_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "logDir": 5 } }""");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [TestMethod]

@@ -54,6 +54,64 @@ public sealed class ContextTests
     }
 
     [TestMethod]
+    public void Create_NoLogDir_DoesNotInstallFileSink()
+    {
+        Context.Create(new TestSettings { LogDir = null });
+
+        // If a FileLog had been installed, this would throw (its instance guard) -- it shouldn't
+        // have been.
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sink = FileLog.Create(logDir);
+        sink.Dispose();
+        Directory.Delete(logDir, recursive: true);
+    }
+
+    [TestMethod]
+    public void Create_SettingsLogDir_InstallsFileSinkAlongsideWhateverElseIsRegistered()
+    {
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            Context.Create(new TestSettings { LogDir = logDir });
+
+            // A FileLog is already live from Create() above -- a second one should throw.
+            Assert.ThrowsExactly<InvalidOperationException>(() => FileLog.Create(logDir));
+        }
+        finally
+        {
+            Logger.Reset();
+            Directory.Delete(logDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void Create_LogDirOverride_TakesPrecedenceOverSettingsLogDir()
+    {
+        var settingsLogDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var overrideLogDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            Context.Create(new TestSettings { LogDir = settingsLogDir }, logDirOverride: overrideLogDir);
+
+            Assert.IsTrue(Directory.Exists(overrideLogDir));
+            Assert.IsFalse(Directory.Exists(settingsLogDir));
+        }
+        finally
+        {
+            Logger.Reset();
+            if (Directory.Exists(overrideLogDir))
+            {
+                Directory.Delete(overrideLogDir, recursive: true);
+            }
+
+            if (Directory.Exists(settingsLogDir))
+            {
+                Directory.Delete(settingsLogDir, recursive: true);
+            }
+        }
+    }
+
+    [TestMethod]
     public void Current_BeforeCreate_Throws()
     {
         Assert.ThrowsExactly<InvalidOperationException>(() => Context.Current);
@@ -95,9 +153,30 @@ public sealed class ContextTests
     {
         var console = new FakeConsole();
 
-        var result = Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, () => 42);
+        var result = Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, logDirOverride: null, () => 42);
 
         Assert.AreEqual(42, result);
+    }
+
+    [TestMethod]
+    public void Start_LogDirOverride_ThreadsThroughToCreate()
+    {
+        var console = new FakeConsole();
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        try
+        {
+            Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, logDirOverride: logDir, () => 0);
+
+            Assert.IsTrue(Directory.Exists(logDir));
+        }
+        finally
+        {
+            Logger.Reset();
+            if (Directory.Exists(logDir))
+            {
+                Directory.Delete(logDir, recursive: true);
+            }
+        }
     }
 
     [TestMethod]
@@ -105,7 +184,7 @@ public sealed class ContextTests
     {
         var console = new FakeConsole();
 
-        Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, () => 0);
+        Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, logDirOverride: null, () => 0);
 
         Assert.AreEqual(1, console.EnsureConsoleCalls);
         Assert.AreEqual(1, console.ReleaseConsoleCalls);
@@ -119,7 +198,7 @@ public sealed class ContextTests
         var runCalled = false;
         try
         {
-            var result = Context.Start(console, "test-app", malformedPath, debugOverride: false, () =>
+            var result = Context.Start(console, "test-app", malformedPath, debugOverride: false, logDirOverride: null, () =>
             {
                 runCalled = true;
                 return 0;
@@ -140,7 +219,7 @@ public sealed class ContextTests
     {
         var console = new FakeConsole();
 
-        var result = Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, () => throw new AppError("boom"));
+        var result = Context.Start(console, "test-app", NonExistentPath(), debugOverride: false, logDirOverride: null, () => throw new AppError("boom"));
 
         Assert.AreEqual(1, result);
         Assert.AreEqual(1, console.ReleaseConsoleCalls);
@@ -152,7 +231,7 @@ public sealed class ContextTests
         var console = new FakeConsole();
 
         Assert.ThrowsExactly<AppError>(() =>
-            Context.Start(console, "test-app", NonExistentPath(), debugOverride: true, () => throw new AppError("boom")));
+            Context.Start(console, "test-app", NonExistentPath(), debugOverride: true, logDirOverride: null, () => throw new AppError("boom")));
 
         Assert.AreEqual(1, console.ReleaseConsoleCalls);
     }

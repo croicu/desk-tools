@@ -269,7 +269,7 @@ dotnet build installer/Setup.wixproj
     configuration, none of them able to see or disturb another's. Concretely: never add plain
     `static` mutable state to `src/Base` for anything that legitimately differs per client (a sink
     list, a sink's configured level/categories, "the current settings") — scope it with
-    `AsyncLocal<T>` instead, the way `Logger`'s sink list, `ConsoleLog`'s/`DebugLog`'s
+    `AsyncLocal<T>` instead, the way `Logger`'s sink list, `ConsoleLog`'s/`DebugLog`'s/`FileLog`'s
     `InstanceActive` guards, and `Settings.Current`/`Context.Current` all already do (see
     `Logger.cs`/`Sinks/`/`Settings.cs`/`Context.cs`) — each sink's own pending buffer (used by
     `Flush`/`Clear`/`Drain`) is plain per-instance state rather than `AsyncLocal` itself, since
@@ -362,6 +362,21 @@ dotnet build installer/Setup.wixproj
   always overrides all of this outright. **`excludedCategories`** is a complementary deny-list,
   only in effect when the resolved `logCategories` is `[]` (the true unfiltered state) — inert
   against an explicit non-empty `logCategories` or the restrictive `["general"]` default.
+- **Logging to a file** — `settings.json`'s `logDir` (or `--log <dir>`, which overrides it — same
+  precedence direction as `--debug` over `settings.debug`) installs a `FileLog` sink
+  (`src/Base/Sinks/FileLog.cs`) alongside whatever else is active, writing to a new file inside
+  `<dir>` named after the timestamp the sink was created. Unlike `ConsoleLog`, `FileLog` is
+  unconditional — no `logLevel`/`logCategories`/`excludedCategories` filtering — same reasoning as
+  `DebugLog`: a persisted file is for later post-mortem debugging, not real-time viewing, so it
+  should capture everything regardless of how the console happens to be configured. Each line is
+  prefixed `[timestamp][correlationId][LEVEL][category]` rather than `ConsoleLog`'s bare
+  `[LEVEL][category]` — a log file, unlike the console, is read later and can interleave lines from
+  several concurrent operations (e.g. several clients in a future multi-client host), so each line
+  needs enough context to attribute it on its own. The correlation id comes from
+  `Correlation.Current` (`src/Base/Correlation.cs`) — an AsyncLocal-scoped, lazily-generated short
+  id for the current logical operation (Architecture convention 10), shared by everything that
+  operation does (including nested awaits/Tasks) but distinct from an unrelated concurrent
+  operation's own id.
 
 ## Coding Style
 
@@ -387,6 +402,7 @@ dotnet build installer/Setup.wixproj
 - **No LINQ method chains for multi-step logic** — use explicit `foreach` loops. A chained `.Where().Select().Aggregate()` obscures control flow and makes multi-step logic harder to step through in a debugger, the same way the Python template this was ported from avoids comprehensions. A single, trivial operation (`.Any()`, `.Count()`, `.FirstOrDefault()` used plainly) isn't what this is aimed at — the line is "does stepping through this in a debugger actually show you what's happening."
 - **No lambdas for logic** — use named local functions or plain `foreach` loops instead of a lambda that does real work (a multi-line predicate, a callback with branching). Lambdas hide intent and cannot be stepped through as cleanly as a named method. This doesn't forbid trivial single-expression uses that are already idiomatic and inert (e.g. `default!`-style factory delegates with no branching).
 - **Namespace mirrors folder structure, file name matches type name** — when a project is split into a subfolder purely for logical grouping (not conditional per-platform compilation — see the `Platform/*` exception below), extend the namespace to match the folder path and drop from the type/file name any suffix the folder already conveys. Concrete precedent: `src/Base/Sinks/ConsoleLog.cs` holds `class ConsoleLog` in namespace `Croicu.Desk.Tools.Base.Sinks`, not `ConsoleLogSink` in the flat `Croicu.Desk.Tools.Base` — the folder already says "Sinks", so repeating "Sink" in the class name is pure redundancy; the fully-qualified name carries the same information either way, just without repeating it. File name matches the type it holds (`ConsoleLogTests.cs` holds `ConsoleLogTests`; `Logger.cs` holds `Logger`, not `Diagnostics.cs`, once `Logger` became that file's sole real class). **Exception**: `src/Service/Platform/{Windows,Linux,Neutral}/ServiceConsole.cs` deliberately keeps the flat `Croicu.Desk.Tools.Service` namespace across all three platform folders rather than nesting into `...Service.Platform.Windows`/etc., since `Program.cs`'s call site selects an implementation via build-time platform switching, not namespace-qualified references, and per-platform namespace branching would add nothing. This predates the convention above and hasn't been reconciled with it — don't silently migrate `Platform/*`'s namespaces to match; ask first if a task touches that area.
+- **`Dir` vs `Path` naming** — a symbol whose value is a directory is named with a `Dir` suffix (`logDir` in `settings.json`, `LogDir` on `ISettingsProvider`/`Settings`, `--log <dir>`'s `LogDir` on `CliArguments`, `FileLog.Create(string logDir)`'s parameter); a symbol whose value is a full file name (directory plus file name, pointing at one specific file) is named with a `Path` suffix instead (e.g. `Settings.Load`'s `path`/`localPath`/`modulePath` parameters, `FileLog.Create`'s internal `logPath` local). Don't use "Path" loosely to mean "some filesystem location" — pick the suffix that says which of the two it actually is.
 - **`using`-directive count as SRP signal** — more than 5–10 `using` directives in a file is a hint that the file may be doing too much. Not a hard rule, but worth pausing to consider whether responsibilities should be split.
 - **Don't build a DI composition-root/factory prematurely** — the same wait-for-evidence judgment as the using-count signal applies to DI wiring. A constructor picking up its second or third injectable parameter (e.g. `Program(string[] argv, ISettingsProvider? provider = null)`) is not yet a smell; extracting a shared factory/helper from a single data point risks guessing at the wrong abstraction shape. Wait for real duplication — a second call site needing the same wiring, or a constructor parameter list that's genuinely grown unwieldy — before extracting one.
 - **Specific settings override generic ones on scope overlap** — when two configuration knobs can both influence the same outcome, the more specific/targeted one wins wherever they'd otherwise disagree, not the more generic/blanket one; the generic one only falls back into play when the specific one was left at its implicit default. Origin case: `settings.json`'s `logLevel` (a targeted verbosity control) vs. `debug` (a blanket flag) both used to influence the console log-category default, with `debug` winning outright — so setting `logLevel: "verbose"` alone did nothing, silently muted by `debug`'s separate default (see the Logging section above for the resulting behavior). Apply this whenever a new settings key's effect could overlap with an existing broader flag's — don't let a coarse toggle silently override an explicit, narrower setting the user actually configured.

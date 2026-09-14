@@ -10,17 +10,21 @@ namespace Croicu.Desk.Tools.Base;
 ///
 /// - Applies <see cref="Settings.LogLevel"/>/<see cref="Settings.LogCategories"/>/
 ///   <see cref="Settings.ExcludedCategories"/> to the console sink (<see cref="Logger.ConfigureConsole"/>).
-/// - Installs a <see cref="DebugLog"/> alongside the console sink (see Diagnostics.cs's multi-sink
+/// - Installs a <see cref="DebugLog"/> alongside the console sink (see Logger.cs's multi-sink
 ///   fan-out) when the resolved <see cref="Debug"/> is true.
+/// - Installs a <see cref="FileLog"/> alongside whatever else is active when a log directory is
+///   resolved (<paramref name="logDirOverride"/> -- see <see cref="Create"/> -- taking precedence
+///   over <see cref="Settings.LogDir"/> if both are given, same precedence direction as
+///   <paramref name="debugOverride"/> over <see cref="Settings.Debug"/>).
 ///
 /// Deliberately not <see cref="Settings"/>'s job: <see cref="Settings.Load"/> is a pure settings.json
 /// parse with no side effects of its own (safe to call repeatedly, e.g. from tests), and wiring up
 /// Logger is a host-level policy decision, not a config-parsing one.
 ///
-/// Takes a plain <paramref name="debugOverride"/> bool rather than a host's own CLI-arguments type
-/// (e.g. Service's <c>CliArguments</c>) -- Architecture convention 9 keeps <c>src/Base</c> from ever
-/// referencing a consuming app's own namespace, so this stays reusable by any host's Program.cs,
-/// not coupled to one app's flag-parsing shape.
+/// Takes plain <paramref name="debugOverride"/>/<paramref name="logDirOverride"/> values rather than
+/// a host's own CLI-arguments type (e.g. Service's <c>CliArguments</c>) -- Architecture convention 9
+/// keeps <c>src/Base</c> from ever referencing a consuming app's own namespace, so this stays
+/// reusable by any host's Program.cs, not coupled to one app's flag-parsing shape.
 ///
 /// Exposed via <see cref="Current"/>, AsyncLocal-scoped like <see cref="Settings.Current"/> --
 /// Architecture convention 10 -- so a caller deep in the call stack can read the resolved
@@ -41,7 +45,7 @@ public sealed class Context
 
     public static Context Current => CurrentInstance.Value ?? throw new InvalidOperationException("Context.Create() must be called first.");
 
-    public static Context Create(ISettingsProvider settings, bool debugOverride = false)
+    public static Context Create(ISettingsProvider settings, bool debugOverride = false, string? logDirOverride = null)
     {
         Logger.ConfigureConsole(
             minLevel: settings.LogLevel,
@@ -52,6 +56,12 @@ public sealed class Context
         if (debug)
         {
             Logger.SetLogger(DebugLog.Create());
+        }
+
+        var logDir = logDirOverride ?? settings.LogDir;
+        if (logDir is not null)
+        {
+            Logger.SetLogger(FileLog.Create(logDir));
         }
 
         var context = new Context(debug);
@@ -78,7 +88,7 @@ public sealed class Context
     /// whatever it needs rather than taking them as parameters -- both are already resolved (via
     /// <see cref="Settings.Load"/>/<see cref="Create"/>) by the time this calls it.
     /// </summary>
-    public static int Start(IConsole console, string appName, string? settingsPath, bool debugOverride, Func<int> run)
+    public static int Start(IConsole console, string appName, string? settingsPath, bool debugOverride, string? logDirOverride, Func<int> run)
     {
         console.EnsureConsole();
         try
@@ -94,7 +104,7 @@ public sealed class Context
                 return 1;
             }
 
-            var context = Create(settings, debugOverride);
+            var context = Create(settings, debugOverride, logDirOverride);
 
             try
             {

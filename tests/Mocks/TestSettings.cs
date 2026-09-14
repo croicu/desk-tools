@@ -20,4 +20,6 @@ public sealed class TestSettings : ISettingsProvider
     public List<string> ExcludedCategories { get; init; } = new();
 
     public int IdleTimeout { get; init; } = 600;
+
+    public string? LogDir { get; init; }
 }

@@ -8,7 +8,7 @@ namespace Croicu.Desk.Tools.Hello;
 /// console-attach/hide work), so <see cref="Context.Start"/> still gets something to bracket
 /// without this needing to actually do anything.
 /// </summary>
-internal sealed class NoOpConsole : IConsole
+internal sealed class VoidConsole : IConsole
 {
     public void EnsureConsole()
     {

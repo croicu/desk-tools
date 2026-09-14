@@ -6,6 +6,19 @@ CLI signature and file format schemas for `desk-tools`.
 
 <!-- Command name, arguments, flags, exit codes. -->
 
+Both `src/Service` (`desk-tools`) and `src/Hello` (`hello`) accept:
+
+- `--log <dir>` -- write a timestamped log file into `<dir>` (creating it if missing), in addition
+  to whatever console/debug sinks are already active; overrides `settings.json`'s `logDir` if both
+  are given. See `docs/ARCHITECTURE.md`'s `FileLog`/`Correlation` entries for the sink itself and
+  the CLAUDE.md Logging section for the file's line format.
+
+`src/Service` additionally accepts `--debug` (override `settings.json`'s `debug` flag) and `-h`/
+`--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
+`--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
+`--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
+it).
+
 ## MCP (`src/Hello`)
 
 Minimal, hand-rolled (no SDK) MCP server over stdio -- launched by an MCP client via `command`
@@ -55,3 +68,6 @@ module nor working-directory tier has a file, `Load()` falls back to restrictive
   `docs/ARCHITECTURE.md`) may go without accepting a connection before it exits. Interim activity
   signal only (accept == activity, for now) -- see
   [issue #5](https://github.com/croicu/desk-tools/issues/5).
+- `logDir` (string, directory, default unset -- no file logging) -- installs a `FileLog` sink
+  writing a timestamped log file into this directory; overridable per-invocation by `--log <dir>`
+  (see the CLI section above). See `docs/ARCHITECTURE.md`'s `FileLog` entry.

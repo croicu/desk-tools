@@ -2,7 +2,7 @@ using Croicu.Desk.Tools.Base;
 
 namespace Croicu.Desk.Tools.Service;
 
-public sealed record CliArguments(bool Debug = false);
+public sealed record CliArguments(bool Debug = false, string? LogDir = null);
 
 public static class Program
 {
@@ -25,7 +25,7 @@ public static class Program
     {
         var arguments = ParseArgs(argv ?? []);
 
-        return Context.Start(new ServiceConsole(), "desk-tools", settingsPath, arguments.Debug, Run);
+        return Context.Start(new ServiceConsole(), "desk-tools", settingsPath, arguments.Debug, arguments.LogDir, Run);
     }
 
     public static int Run()
@@ -33,6 +33,7 @@ public static class Program
         Logger.Info("desk-tools: started.");
         new Host(Settings.Current).Run();
         Logger.Info("desk-tools: completed.");
+
         return 0;
     }
 
@@ -45,20 +46,33 @@ public static class Program
     internal static CliArguments ParseArgs(string[] argv)
     {
         var debug = false;
-        foreach (var arg in argv)
+        string? logDir = null;
+        for (var i = 0; i < argv.Length; i++)
         {
+            var arg = argv[i];
             if (arg == "--debug")
             {
                 debug = true;
             }
+            else if (arg == "--log")
+            {
+                if (i + 1 >= argv.Length)
+                {
+                    Logger.Error("desk-tools: error: --log requires a directory argument");
+                    Environment.Exit(2);
+                }
+
+                logDir = argv[++i];
+            }
             else if (arg is "-h" or "--help")
             {
-                Logger.Print("usage: desk-tools [--debug]");
+                Logger.Print("usage: desk-tools [--debug] [--log <dir>]");
                 Logger.Print(string.Empty);
                 Logger.Print("Authoring repo for Claude Code MCP servers and tools used by the ecosystem and distributed by desk-organizer. Produces artifacts; does not run them.");
                 Logger.Print(string.Empty);
                 Logger.Print("options:");
-                Logger.Print("  --debug   override settings.json's debug flag");
+                Logger.Print("  --debug        override settings.json's debug flag");
+                Logger.Print("  --log <dir>    override settings.json's logDir; write a timestamped log file into <dir>");
 
                 Environment.Exit(0);
             }
@@ -69,6 +83,6 @@ public static class Program
             }
         }
 
-        return new CliArguments(Debug: debug);
+        return new CliArguments(Debug: debug, LogDir: logDir);
     }
 }
