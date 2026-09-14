@@ -6,6 +6,28 @@ CLI signature and file format schemas for `desk-tools`.
 
 <!-- Command name, arguments, flags, exit codes. -->
 
+## MCP (`src/Hello`)
+
+Minimal, hand-rolled (no SDK) MCP server over stdio -- launched by an MCP client via `command`
+(e.g. `dotnet Hello.dll`), speaks newline-delimited JSON-RPC 2.0 on stdin/stdout per the
+[stdio transport spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports),
+verified 2026-09-13. Supports protocol version `2025-06-18` only.
+
+Implements the standard `initialize` -> `initialized` notification -> operation lifecycle
+([spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)) and:
+
+- `tools/list` -- returns one tool:
+  - `say_hello` -- `inputSchema: {"type":"object","properties":{},"additionalProperties":false}`
+    (no arguments).
+- `tools/call` -- `say_hello` returns `{"content":[{"type":"text","text":"Hi from MCP"}],"isError":false}`.
+  An unknown tool name is a JSON-RPC `-32602` (Invalid params) error, not a tool-level
+  `isError: true` result.
+
+Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (Parse error) with
+`id: null`. Not yet implemented: `resources`, `prompts`, `listChanged` notifications, pagination --
+this is intentionally minimal, a stepping stone toward the real dispatch work referenced in
+`docs/ARCHITECTURE.md`'s `Host` entry.
+
 ## File formats
 
 <!-- Schemas for any files this project reads or writes. -->

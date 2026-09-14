@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "hello": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "out/Debug/net10.0/Hello.dll"
+      ],
+      "env": {}
+    }
+  }
+}
