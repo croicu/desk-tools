@@ -13,10 +13,13 @@ namespace Croicu.Desk.Tools.Hello;
 /// JSON-RPC over this project's own transports rather than depend on the official MCP SDK's
 /// hosting/transport assumptions.
 /// </summary>
+public sealed record CliArguments(string? LogDir = null);
+
 public static class Program
 {
     private const string SupportedProtocolVersion = "2025-06-18";
     private const string SayHelloToolName = "say_hello";
+    private const string RequestCategory = "mcp";
 
     private const int ParseErrorCode = -32700;
     private const int InvalidRequestCode = -32600;
@@ -35,7 +38,7 @@ public static class Program
         ["additionalProperties"] = false,
     };
 
-    public static int Main(string[] args) => Start();
+    public static int Main(string[] args) => Start(args);
 
     /// <summary>
     /// Testable entry point -- Main() just forwards here. settingsPath lets a test point at a
@@ -53,14 +56,51 @@ public static class Program
     /// same base class and writes unconditionally regardless of which sink is active, so it still
     /// works correctly here. No <see cref="IConsole"/> lifecycle concerns of its own (unlike
     /// Service, this is a plain stdio server, never a hidden-subsystem Windows app), hence
-    /// <see cref="NoOpConsole"/>; no CLI args to derive a debug override from, hence the literal
-    /// <c>false</c> -- <c>settings.debug</c> alone still drives it if set.
+    /// <see cref="VoidConsole"/>; no CLI-driven debug override, hence the literal <c>false</c> --
+    /// <c>settings.debug</c> alone still drives it if set. <c>--log</c> is the one CLI flag Hello
+    /// does parse (see <see cref="ParseArgs"/>), since a persisted log file is often the only way to
+    /// debug a stdio server that can never print to its own console.
     /// </summary>
-    internal static int Start(string? settingsPath = null)
+    internal static int Start(string[]? argv = null, string? settingsPath = null)
     {
         Logger.SetLogger(new DiagnosticsLog());
 
-        return Context.Start(new NoOpConsole(), "hello", settingsPath, debugOverride: false, () => Run());
+        var arguments = ParseArgs(argv ?? []);
+
+        return Context.Start(new VoidConsole(), "hello", settingsPath, debugOverride: false, arguments.LogDir, () => Run());
+    }
+
+    /// <summary>
+    /// Hand-rolled, mirrors Service's own ParseArgs -- <c>--log &lt;dir&gt;</c> is the only flag
+    /// Hello needs today. Errors go through <see cref="Logger"/> same as Service's own error
+    /// handling, even though nothing reaches stdout at this point (see <see cref="Start"/>'s own
+    /// remarks) -- consistent behavior (log-and-exit-nonzero) matters more here than a message
+    /// anyone will actually see.
+    /// </summary>
+    internal static CliArguments ParseArgs(string[] argv)
+    {
+        string? logDir = null;
+        for (var i = 0; i < argv.Length; i++)
+        {
+            var arg = argv[i];
+            if (arg == "--log")
+            {
+                if (i + 1 >= argv.Length)
+                {
+                    Logger.Error("hello: error: --log requires a directory argument");
+                    Environment.Exit(2);
+                }
+
+                logDir = argv[++i];
+            }
+            else
+            {
+                Logger.Error($"hello: error: unrecognized argument: {arg}");
+                Environment.Exit(2);
+            }
+        }
+
+        return new CliArguments(LogDir: logDir);
     }
 
     /// <summary>
@@ -89,8 +129,19 @@ public static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Logs the raw incoming line before attempting to parse it -- deliberately unconditional on
+    /// parse success, so a malformed request is still visible in a FileLog file (see
+    /// <see cref="Context.Create"/>) even though it never reaches a handler. Never reaches stdout
+    /// regardless of level/category filtering: Hello never installs a <see cref="ConsoleLog"/> (see
+    /// <see cref="Start"/>'s own remarks), and <see cref="Logger.Info"/> -- unlike
+    /// <see cref="Logger.Print"/> -- goes through each sink's normal <c>Log()</c> path, which the
+    /// silent placeholder <see cref="DiagnosticsLog"/> sink never presents.
+    /// </summary>
     private static void HandleLine(string line)
     {
+        Logger.Info($"hello: received request: {line}", RequestCategory);
+
         JsonDocument doc;
         try
         {

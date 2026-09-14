@@ -30,19 +30,22 @@ public sealed record Settings : ISettingsProvider
     public List<string> LogCategories { get; }
     public List<string> ExcludedCategories { get; }
     public int IdleTimeout { get; }
+    public string? LogDir { get; }
 
     private Settings(
         bool debug,
         TelemetryLevel logging,
         List<string> logCategories,
         List<string> excludedCategories,
-        int idleTimeout)
+        int idleTimeout,
+        string? logDir)
     {
         Debug = debug;
         LogLevel = logging;
         LogCategories = logCategories;
         ExcludedCategories = excludedCategories;
         IdleTimeout = idleTimeout;
+        LogDir = logDir;
     }
 
     public static Settings Current => CurrentInstance.Value ?? throw new InvalidOperationException("Settings.Load() must be called first.");
@@ -55,6 +58,7 @@ public sealed record Settings : ISettingsProvider
         var excludedCategories = new List<string>();
         var expandCategories = false;
         var idleTimeout = 600;
+        string? logDir = null;
 
         var payload = LoadPayload(modulePath ?? DefaultModulePath, path ?? DefaultSettingsPath, localPath ?? DefaultLocalPath);
 
@@ -135,6 +139,16 @@ public sealed record Settings : ISettingsProvider
 
                 idleTimeout = idleTimeoutEl.GetInt32();
             }
+
+            if (payload.TryGetValue("logDir", out var logDirEl))
+            {
+                if (logDirEl.ValueKind != JsonValueKind.String)
+                {
+                    throw new SettingsError("'settings.logDir' in settings.json must be a string.");
+                }
+
+                logDir = logDirEl.GetString();
+            }
         }
 
         if (logCategories.Count == 0)
@@ -146,7 +160,7 @@ public sealed record Settings : ISettingsProvider
             logCategories = expandCategories ? new List<string>() : new List<string> { DiagnosticsCategories.General };
         }
 
-        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout);
+        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir);
         CurrentInstance.Value = settings;
 
         return settings;
@@ -199,7 +213,7 @@ public sealed record Settings : ISettingsProvider
         if (!moduleFound && !pathFound)
         {
             // Load()'s own consumer effect: with no settings.json at either base tier, every knob
-            // it reads (debug, logLevel, logCategories, excludedCategories, idleTimeout)
+            // it reads (debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir)
             // falls back to its own restrictive default -- a meaningful behavior change (e.g.
             // Verbose/Info logging is unreachable for the rest of the run without one), so this is
             // Warning rather than Info.

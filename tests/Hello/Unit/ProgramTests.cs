@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Base.Sinks;
 using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Hello.Tests.Unit;
@@ -10,6 +11,70 @@ public sealed class ProgramTests
 {
     [TestCleanup]
     public void Cleanup() => Logger.Reset();
+
+    [TestMethod]
+    public void Run_ValidRequest_LogsRawRequestLineAtInfoUnderMcpCategory()
+    {
+        const string request = """{"jsonrpc":"2.0","id":7,"method":"tools/list"}""";
+        var sink = new RecordingSink();
+        Logger.SetLogger(sink);
+        try
+        {
+            Program.Run(new StringReader(request));
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+        }
+
+        Assert.IsTrue(sink.Received.Exists(r =>
+            r.Level == TelemetryLevel.Info && r.Category == "mcp" && r.Message.Contains(request)));
+    }
+
+    /// <summary>
+    /// Request logging goes through Logger.Info() (the normal Log() path, level/category-filtered
+    /// per sink), not Logger.Print() (unconditional) -- unlike the response line, it must never
+    /// leak to stdout regardless of which sink is active, since Hello never installs a ConsoleLog.
+    /// This is exactly the same guarantee Run_EmptyInput_ReturnsZeroWithNoOutput already relies on
+    /// for a request that logs nothing; this proves it still holds for one that does.
+    /// </summary>
+    [TestMethod]
+    public void Run_ValidRequest_RequestLogNeverReachesStdout()
+    {
+        const string request = """{"jsonrpc":"2.0","id":8,"method":"tools/list"}""";
+
+        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(request)));
+
+        Assert.DoesNotContain("received request", output);
+    }
+
+    private sealed class RecordingSink : DiagnosticsLog
+    {
+        public List<TelemetryRecord> Received { get; } = new();
+
+        public override TelemetryRecord Log(TelemetryLevel level, string message, string category = DiagnosticsCategories.General)
+        {
+            var record = base.Log(level, message, category);
+            Received.Add(record);
+            return record;
+        }
+    }
+
+    [TestMethod]
+    public void ParseArgs_Log_SetsLogDir()
+    {
+        var arguments = Program.ParseArgs(["--log", "/var/log/hello"]);
+
+        Assert.AreEqual("/var/log/hello", arguments.LogDir);
+    }
+
+    [TestMethod]
+    public void ParseArgs_NoArgs_LogDirIsNull()
+    {
+        var arguments = Program.ParseArgs([]);
+
+        Assert.IsNull(arguments.LogDir);
+    }
 
     [TestMethod]
     public void Run_EmptyInput_ReturnsZeroWithNoOutput()
@@ -159,6 +224,49 @@ public sealed class ProgramTests
         finally
         {
             Console.SetIn(originalIn);
+        }
+    }
+
+    /// <summary>
+    /// Proves --log's whole reason for existing: a stdio server can never print diagnostics to its
+    /// own console, so a persisted log file is the one way to see what happened -- and installing it
+    /// must not disturb the clean, single-line protocol response on stdout.
+    /// </summary>
+    [TestMethod]
+    public void Start_WithLogArgument_WritesLogFileAndStillRespondsCleanly()
+    {
+        var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        const string request = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""";
+        var originalIn = Console.In;
+        Console.SetIn(new StringReader(request));
+        try
+        {
+            var output = ConsoleCapture.CaptureOut(() => Program.Start(["--log", logDir], settingsPath: NonExistentPath()));
+
+            var response = ParseSingleResponseLine(output);
+            Assert.AreEqual("2025-06-18", response.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
+            Assert.IsTrue(Directory.Exists(logDir));
+            var logFiles = Directory.GetFiles(logDir);
+            Assert.HasCount(1, logFiles);
+
+            // FileLog's own file handle is still open at this point (Context.Start never disposes
+            // sinks after run() returns) -- reset first so File.ReadAllText below doesn't race a
+            // still-open write handle.
+            Logger.Reset();
+
+            var logContent = File.ReadAllText(logFiles[0]);
+            Assert.Contains("received request", logContent);
+            Assert.Contains(request, logContent);
+            Assert.Contains(output.Trim(), logContent);
+        }
+        finally
+        {
+            Console.SetIn(originalIn);
+            Logger.Reset();
+            if (Directory.Exists(logDir))
+            {
+                Directory.Delete(logDir, recursive: true);
+            }
         }
     }
 

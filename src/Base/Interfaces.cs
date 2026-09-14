@@ -53,6 +53,14 @@ public interface ISettingsProvider
     List<string> ExcludedCategories { get; }
 
     int IdleTimeout { get; }
+
+    /// <summary>
+    /// Directory a <see cref="Sinks.FileLog"/> should write its timestamped log file into, or null
+    /// for no file logging -- see <see cref="Context.Create"/>. Named with a "Dir" suffix (not
+    /// "Path") since it's a directory, not a full file name -- the sink itself picks the actual
+    /// file name/path within it.
+    /// </summary>
+    string? LogDir { get; }
 }
 
 /// <summary>
