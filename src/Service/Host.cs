@@ -1,25 +1,31 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using Croicu.Desk.Tools.Base;
 
 namespace Croicu.Desk.Tools.Service;
 
 /// <summary>
-/// Chunk-0 resident-process skeleton (see tasks/resident-process-skeleton.md): stays alive
-/// accepting -- and immediately closing -- TCP connections, then exits once no connection has been
-/// in flight for <see cref="ISettingsProvider.IdleTimeout"/>. Accepting a connection is the
-/// interim activity signal ("Activity tracking (interim)" in the task doc): once real JSON-RPC
-/// framing/dispatch lands, the real spec wants the timer reset on completed request, not connection
-/// open.
+/// Resident-process skeleton (see tasks/resident-process-skeleton.md): stays alive accepting TCP
+/// connections, echoing back one newline-delimited line of text per connection (see
+/// <see cref="HandleConnection"/>), then exits once no connection has been in flight for
+/// <see cref="ISettingsProvider.IdleTimeout"/>. Accepting a connection is the interim activity
+/// signal ("Activity tracking (interim)" in the task doc): once real JSON-RPC framing/dispatch
+/// lands, the real spec wants the timer reset on completed request, not connection open. The port
+/// to listen on comes from <see cref="ISettingsProvider.Port"/> (shared settings.json, so a
+/// separate client process -- <c>src/Desk</c> -- can learn the same value independently).
 /// </summary>
 internal sealed class Host
 {
-    // Placeholder only -- the real shared port for say_hello gets finalized once framing lands (see
-    // the task doc's Design decisions). Exists purely so the accept loop has something to listen on
-    // for this chunk.
-    internal const int DefaultPort = 51823;
-
     private const string Category = "host";
+
+    // Not Encoding.UTF8 -- that instance's GetPreamble() is a 3-byte BOM, and StreamWriter writes
+    // it unconditionally on its first Flush() even when zero characters were ever written (e.g. a
+    // client that sends no line at all), corrupting the wire with bytes no client asked for. A
+    // StreamReader using Encoding.UTF8 silently strips a leading BOM on read (its default
+    // detectEncodingFromByteOrderMarks), which is exactly why this only ever showed up in a raw
+    // byte-level test, never in one going through StreamReader.
+    private static readonly UTF8Encoding WriteEncoding = new(encoderShouldEmitUTF8Identifier: false);
 
     private static readonly TimeSpan IdleCheckInterval = TimeSpan.FromSeconds(2);
 
@@ -34,10 +40,10 @@ internal sealed class Host
     private volatile bool _accepting;
     private Thread? _acceptThread;
 
-    public Host(ISettingsProvider settings, int port = DefaultPort)
+    public Host(ISettingsProvider settings, int? port = null)
     {
         _settings = settings;
-        _listener = new TcpListener(IPAddress.Loopback, port);
+        _listener = new TcpListener(IPAddress.Loopback, port ?? settings.Port);
         _lastActivity = DateTimeOffset.UtcNow;
     }
 
@@ -109,9 +115,12 @@ internal sealed class Host
     }
 
     /// <summary>
-    /// Named handler (not a lambda) per the task doc's Design decisions -- accept, close, record
-    /// activity, and track in-flight count around the handling so <see cref="CheckIdle"/> never
-    /// fires mid-connection.
+    /// Named handler (not a lambda) per the task doc's Design decisions -- accept, echo, close,
+    /// record activity, and track in-flight count around the handling so <see cref="CheckIdle"/>
+    /// never fires mid-connection. Reads at most one newline-delimited line and writes it straight
+    /// back (plain text, no framing beyond the trailing newline -- see docs/PROTOCOL.md), then
+    /// closes; a client that sends nothing (EOF with no line) gets no reply, just a closed
+    /// connection.
     /// </summary>
     private void HandleConnection(TcpClient client)
     {
@@ -119,7 +128,18 @@ internal sealed class Host
         try
         {
             RecordActivity();
-            client.Close();
+
+            using (client)
+            using (var stream = client.GetStream())
+            using (var reader = new StreamReader(stream, Encoding.UTF8))
+            using (var writer = new StreamWriter(stream, WriteEncoding) { NewLine = "\n", AutoFlush = true })
+            {
+                var line = reader.ReadLine();
+                if (line is not null)
+                {
+                    writer.WriteLine(line);
+                }
+            }
         }
         finally
         {

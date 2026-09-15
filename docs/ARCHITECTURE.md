@@ -6,8 +6,9 @@ Modules, data flow, and contracts for `desk-tools`.
 
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Context/Errors/
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
-     Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), and src/Hello/ (a
-     minimal stdio MCP server, references Base.csproj): what it owns, what it depends on. -->
+     Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
+     minimal stdio MCP server, references Base.csproj), and src/Desk/ (a console client for
+     src/Service's Host, references Base.csproj): what it owns, what it depends on. -->
 
 Base.dll is designed to be safe inside a service hosting multiple heterogeneous clients in one
 process, each "renting" its own `ExecutionContext` with independent settings/logging. See
@@ -85,14 +86,16 @@ for whatever it needs since both are already resolved by the time `Context.Start
 
 `src/Service/Host.cs` (chunk 0 of the resident-process skeleton -- see
 [issue #5](https://github.com/croicu/desk-tools/issues/5)): the resident process's bare hosting
-mechanics, ahead of real JSON-RPC framing/dispatch. Owns a `TcpListener` on a placeholder port
-(`Host.DefaultPort` -- not yet the real shared `say_hello` port), an accept loop on a dedicated
-background thread that dispatches each connection to the thread pool via a named handler (accept,
-then close immediately -- no payload handling yet), and a `System.Threading.Timer`-driven idle check
-that exits the process once no connection has been accepted for `Settings.IdleTimeout` and
-none is currently in flight. `Program.cs` constructs one and calls `Run()` after settings load.
-Console attach/detach on Windows (`ServiceConsole` under `src/Service/Platform/`, implementing
-`Base`'s `IConsole`) is unrelated prior work -- see the `wingui-console-poc` history.
+mechanics, ahead of real JSON-RPC framing/dispatch. Owns a `TcpListener` on
+`ISettingsProvider.Port` (shared settings.json, default `51823` -- not yet the real `say_hello`
+port), an accept loop on a dedicated background thread that dispatches each connection to the
+thread pool via a named handler (reads at most one newline-delimited line and writes it straight
+back, then closes -- plain-text echo, still ahead of real JSON-RPC framing/dispatch), and a
+`System.Threading.Timer`-driven idle check that exits the process once no connection has been
+accepted for `Settings.IdleTimeout` and none is currently in flight. `Program.cs` constructs one
+and calls `Run()` after settings load. Console attach/detach on Windows (`ServiceConsole` under
+`src/Service/Platform/`, implementing `Base`'s `IConsole`) is unrelated prior work -- see the
+`wingui-console-poc` history.
 
 `installer/Package.wxs` registers `Service.exe` as a Windows scheduled task (`"Desk Tools
 Service"`), not a formal Windows Service (SCM) -- deferred custom actions shelling out to
@@ -119,16 +122,30 @@ CLI flag of its own, `--log <dir>`
 (see `docs/PROTOCOL.md`), since a stdio server that can never print to its own console needs a
 `FileLog` file as its one way to be debugged after the fact.
 
+`src/Desk/Program.cs`: a plain console client for `src/Service`'s `Host` -- connects to its
+loopback listener on `ISettingsProvider.Port` (the same shared settings.json `Host` itself reads,
+so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one
+newline-delimited line as an echo request, waits for the same line echoed back, prints it via
+`Logger.Print`, then exits. The actual connect/send/read exchange lives in `Client`
+(`src/Desk/Client.cs`), constructed with an optional port override (same pattern as `Host`'s own
+constructor) so a test can point it at a test-local peer instead of the real settings-resolved port.
+Fails fast, no retry and no auto-starting the service, via a plain `AppError` when the connection
+fails or closes before a reply arrives -- surfaced through the same `AppError`-to-exit-code-1
+handling every other app here already gets from `Context.Start`. No `IConsole` concerns of its own
+(an ordinary console app, already console-attached), hence its own `VoidConsole`, same reasoning as
+Hello's but for the opposite reason (Hello is headless; Desk is already attached).
+
 ## Data flow
 
 <!-- How data enters, gets transformed, and leaves the system. -->
 
 `Program.cs` loads `Settings` (see `docs/PROTOCOL.md`'s settings.json discovery order) before
-constructing `Host`, so every knob `Host` reads (`IdleTimeout`, and eventually the real listen
-port) is already resolved by the time it starts. At runtime, `Host` only reacts to two inputs: a
-TCP connection being accepted (the interim activity signal) and the idle-check timer's own clock --
-no data flows out of it yet beyond log lines, since there's no request/response payload until
-framing/dispatch lands.
+constructing `Host`, so every knob `Host` reads (`IdleTimeout`, `Port`) is already resolved by the
+time it starts. At runtime, `Host` reacts to a TCP connection being accepted: it's both the interim
+activity signal and the trigger to read one line and echo it back before closing. `src/Desk` is the
+other end of that exchange -- it resolves the same `Port` from its own `Settings.Load()` call (same
+shared settings.json, no direct dependency between the two processes beyond that shared file), then
+connects, sends, and reads back exactly what `Host` echoes.
 
 ## Contracts
 

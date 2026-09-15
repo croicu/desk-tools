@@ -2,15 +2,31 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": ".NET: Run (CLI)",
+      "name": ".NET: Run Service (CLI)",
       "type": "coreclr",
       "request": "launch",
-      "preLaunchTask": "build",
       "program": "${workspaceFolder}/out/Debug/net10.0/Service.dll",
       "args": [],
       "cwd": "${workspaceFolder}/src/Service",
       "console": "integratedTerminal",
       "stopAtEntry": false
+    },
+    {
+      "name": ".NET: Run Desk (CLI)",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "${workspaceFolder}/out/Debug/net10.0/Desk.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Desk",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    },
+    {
+      "name": ".NET: Attach Service",
+      "type": "coreclr",
+      "request": "attach",
+      "preLaunchTask": "start service",
+      "processName": "Service.exe"
     }
   ],
   "inputs": []

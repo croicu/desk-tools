@@ -83,6 +83,52 @@
       "problemMatcher": []
     },
     {
+      "label": "reinstall-msi (Debug)",
+      "type": "shell",
+      "dependsOn": [
+        "build-msi (Debug)"
+      ],
+      "dependsOrder": "sequence",
+      "command": "msiexec",
+      "args": [
+        "/i",
+        "release\\Debug\\Service.msi",
+        // Only for when Desk Tools is ALREADY installed (same product/version) and you just want
+        // its files overwritten from a fresh Debug build -- REINSTALL=ALL on a product that is NOT
+        // currently installed turns the whole install into a no-op instead of falling back to a
+        // normal install, despite MSDN's claim that REINSTALL is "ignored" in that case (confirmed
+        // the hard way: no ARP entry, nothing under Program Files). Use plain install-msi (Debug)
+        // for a genuinely fresh install. REINSTALLMODE=amus: a = reinstall all files regardless of
+        // version/checksum (needed since the version is hardcoded 1.0.0.0 and never bumps between
+        // Debug rebuilds), m/u = rewrite machine/user registry entries, s = re-shortcut.
+        "REINSTALL=ALL",
+        "REINSTALLMODE=amus"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "start service",
+      "type": "shell",
+      "command": "schtasks",
+      "args": [
+        "/run",
+        "/tn",
+        "\"Desk Tools Service\""
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "stop service",
+      "type": "shell",
+      "command": "schtasks",
+      "args": [
+        "/end",
+        "/tn",
+        "\"Desk Tools Service\""
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "zap",
       "type": "shell",
       "problemMatcher": [],

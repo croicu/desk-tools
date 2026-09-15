@@ -15,6 +15,7 @@ public sealed record Settings : ISettingsProvider
 {
     private const string DefaultSettingsPath = "./settings.json";
     private const string DefaultLocalPath = "./settings.local.json";
+    private const int DefaultPort = 51823;
 
     // AppContext.BaseDirectory is fixed for the lifetime of the process, so this is computed once
     // rather than re-resolved on every Load()/Section() call.
@@ -31,6 +32,7 @@ public sealed record Settings : ISettingsProvider
     public List<string> ExcludedCategories { get; }
     public int IdleTimeout { get; }
     public string? LogDir { get; }
+    public int Port { get; }
 
     private Settings(
         bool debug,
@@ -38,7 +40,8 @@ public sealed record Settings : ISettingsProvider
         List<string> logCategories,
         List<string> excludedCategories,
         int idleTimeout,
-        string? logDir)
+        string? logDir,
+        int port)
     {
         Debug = debug;
         LogLevel = logging;
@@ -46,6 +49,7 @@ public sealed record Settings : ISettingsProvider
         ExcludedCategories = excludedCategories;
         IdleTimeout = idleTimeout;
         LogDir = logDir;
+        Port = port;
     }
 
     public static Settings Current => CurrentInstance.Value ?? throw new InvalidOperationException("Settings.Load() must be called first.");
@@ -59,6 +63,7 @@ public sealed record Settings : ISettingsProvider
         var expandCategories = false;
         var idleTimeout = 600;
         string? logDir = null;
+        var port = DefaultPort;
 
         var payload = LoadPayload(modulePath ?? DefaultModulePath, path ?? DefaultSettingsPath, localPath ?? DefaultLocalPath);
 
@@ -149,6 +154,16 @@ public sealed record Settings : ISettingsProvider
 
                 logDir = logDirEl.GetString();
             }
+
+            if (payload.TryGetValue("port", out var portEl))
+            {
+                if (portEl.ValueKind != JsonValueKind.Number)
+                {
+                    throw new SettingsError("'settings.port' in settings.json must be a number.");
+                }
+
+                port = portEl.GetInt32();
+            }
         }
 
         if (logCategories.Count == 0)
@@ -160,7 +175,7 @@ public sealed record Settings : ISettingsProvider
             logCategories = expandCategories ? new List<string>() : new List<string> { DiagnosticsCategories.General };
         }
 
-        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir);
+        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir, port);
         CurrentInstance.Value = settings;
 
         return settings;
