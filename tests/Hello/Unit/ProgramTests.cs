@@ -1,12 +1,17 @@
 using System.Text.Json;
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Base.Sinks;
-using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Hello.Tests.Unit;
 
+/// <summary>
+/// Every test here installs its own DiagnosticsLog (the same sink Start() itself installs, see
+/// src/Hello/Program.cs) pointed at a private StringWriter -- either directly (Run()-level tests,
+/// via CaptureOutput()) or via Start()'s own injectable output parameter (Start()-level tests) --
+/// instead of redirecting the real, process-wide Console.Out/Console.In, so this class runs safely
+/// in parallel with everything else.
+/// </summary>
 [TestClass]
-[DoNotParallelize]
 public sealed class ProgramTests
 {
     [TestCleanup]
@@ -43,7 +48,7 @@ public sealed class ProgramTests
     {
         const string request = """{"jsonrpc":"2.0","id":8,"method":"tools/list"}""";
 
-        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(request)));
+        var output = CaptureOutput(() => Program.Run(new StringReader(request)));
 
         Assert.DoesNotContain("received request", output);
     }
@@ -80,7 +85,7 @@ public sealed class ProgramTests
     public void Run_EmptyInput_ReturnsZeroWithNoOutput()
     {
         var exitCode = -1;
-        var output = ConsoleCapture.CaptureOut(() => exitCode = Program.Run(new StringReader(string.Empty)));
+        var output = CaptureOutput(() => exitCode = Program.Run(new StringReader(string.Empty)));
 
         Assert.AreEqual(0, exitCode);
         Assert.IsEmpty(output);
@@ -162,7 +167,7 @@ public sealed class ProgramTests
             {"jsonrpc":"2.0","id":10,"method":"tools/list"}
             """;
 
-        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(input)));
+        var output = CaptureOutput(() => Program.Run(new StringReader(input)));
 
         var lines = new List<string>();
         using (var reader = new StringReader(output))
@@ -206,7 +211,7 @@ public sealed class ProgramTests
     {
         const string notification = """{"jsonrpc":"2.0","method":"notifications/initialized"}""";
 
-        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(notification)));
+        var output = CaptureOutput(() => Program.Run(new StringReader(notification)));
 
         Assert.IsEmpty(output);
     }
@@ -230,27 +235,17 @@ public sealed class ProgramTests
     /// nonexistent settingsPath guarantees at least one -- "no settings file found ...; falling
     /// back to restrictive defaults"). If Start() didn't install a silent sink first, those would
     /// reach Logger's default ConsoleLog sink and print straight to stdout alongside the real
-    /// response, corrupting the protocol stream. Redirects Console.In (real stdin) in addition to
-    /// the class's usual Console.Out capture, since Start() -- unlike Run() -- doesn't take an
-    /// injectable TextReader.
+    /// response, corrupting the protocol stream. Uses Start()'s own injectable input/output
+    /// parameters rather than redirecting the real Console.In/Console.Out.
     /// </summary>
     [TestMethod]
     public void Start_EmptyInput_ProducesNoOutputDespiteSettingsLoadLoggingInternally()
     {
-        var originalIn = Console.In;
-        Console.SetIn(new StringReader(string.Empty));
-        try
-        {
-            var exitCode = -1;
-            var output = ConsoleCapture.CaptureOut(() => exitCode = Program.Start(settingsPath: NonExistentPath()));
+        var writer = new StringWriter();
+        var exitCode = Program.Start(settingsPath: NonExistentPath(), input: new StringReader(string.Empty), output: writer);
 
-            Assert.AreEqual(0, exitCode);
-            Assert.IsEmpty(output);
-        }
-        finally
-        {
-            Console.SetIn(originalIn);
-        }
+        Assert.AreEqual(0, exitCode);
+        Assert.IsEmpty(writer.ToString());
     }
 
     /// <summary>
@@ -261,19 +256,12 @@ public sealed class ProgramTests
     public void Start_InitializeRequest_RespondsCleanly()
     {
         const string request = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""";
-        var originalIn = Console.In;
-        Console.SetIn(new StringReader(request));
-        try
-        {
-            var output = ConsoleCapture.CaptureOut(() => Program.Start(settingsPath: NonExistentPath()));
+        var writer = new StringWriter();
 
-            var response = ParseSingleResponseLine(output);
-            Assert.AreEqual("2025-06-18", response.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
-        }
-        finally
-        {
-            Console.SetIn(originalIn);
-        }
+        Program.Start(settingsPath: NonExistentPath(), input: new StringReader(request), output: writer);
+
+        var response = ParseSingleResponseLine(writer.ToString());
+        Assert.AreEqual("2025-06-18", response.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
     }
 
     /// <summary>
@@ -286,12 +274,12 @@ public sealed class ProgramTests
     {
         var logDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         const string request = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""";
-        var originalIn = Console.In;
-        Console.SetIn(new StringReader(request));
+        var writer = new StringWriter();
         try
         {
-            var output = ConsoleCapture.CaptureOut(() => Program.Start(["--log", logDir], settingsPath: NonExistentPath()));
+            Program.Start(["--log", logDir], settingsPath: NonExistentPath(), input: new StringReader(request), output: writer);
 
+            var output = writer.ToString();
             var response = ParseSingleResponseLine(output);
             Assert.AreEqual("2025-06-18", response.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString());
             Assert.IsTrue(Directory.Exists(logDir));
@@ -310,7 +298,6 @@ public sealed class ProgramTests
         }
         finally
         {
-            Console.SetIn(originalIn);
             Logger.Reset();
             if (Directory.Exists(logDir))
             {
@@ -320,12 +307,35 @@ public sealed class ProgramTests
     }
 
     /// <summary>
+    /// Installs the same DiagnosticsLog sink Start() itself installs (see src/Hello/Program.cs),
+    /// pointed at a private StringWriter instead of the real Console.Out, runs <paramref
+    /// name="action"/>, then returns what was written -- the Run()-level equivalent of Start()'s own
+    /// injectable output parameter, for tests that call Program.Run() directly rather than going
+    /// through Start().
+    /// </summary>
+    private static string CaptureOutput(Action action)
+    {
+        var writer = new StringWriter();
+        Logger.SetLogger(new DiagnosticsLog(printWriter: writer));
+        try
+        {
+            action();
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+        }
+
+        return writer.ToString();
+    }
+
+    /// <summary>
     /// Runs Program.Run() over the given newline-delimited input and asserts it produced exactly
     /// one response line, returning it parsed.
     /// </summary>
     private static JsonDocument RunSingleRequest(string input)
     {
-        var output = ConsoleCapture.CaptureOut(() => Program.Run(new StringReader(input)));
+        var output = CaptureOutput(() => Program.Run(new StringReader(input)));
         return ParseSingleResponseLine(output);
     }
 

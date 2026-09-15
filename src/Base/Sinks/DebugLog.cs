@@ -21,7 +21,8 @@ public sealed class DebugLog : DiagnosticsLog
 
     private readonly Action<string> _write;
 
-    private DebugLog(Action<string> write)
+    private DebugLog(Action<string> write, TextWriter? basePrintWriter)
+        : base(printWriter: basePrintWriter)
     {
         _write = write;
     }
@@ -37,8 +38,15 @@ public sealed class DebugLog : DiagnosticsLog
     /// System.Diagnostics.Debug.Listeners/TextWriterTraceListener aren't available without the
     /// separate System.Diagnostics.TraceSource package in this TFM, so tests inject a collecting
     /// delegate here instead of pulling in that dependency just to observe output.
+    ///
+    /// <paramref name="basePrintWriter"/> is a second, narrower test-only seam: <see cref="Print"/>
+    /// is overridden below and never calls the inherited <see cref="DiagnosticsLog.Print"/>, so this
+    /// parameter has no effect on this sink's own real behavior -- it exists only so a regression
+    /// test can pass its own <see cref="StringWriter"/> as the base class's default-Console channel
+    /// and assert it stayed empty, proving <see cref="Print"/> never fell through to it, without
+    /// redirecting the real, process-wide <see cref="Console.Out"/> to do so.
     /// </summary>
-    public static DebugLog Create(Action<string>? write = null)
+    public static DebugLog Create(Action<string>? write = null, TextWriter? basePrintWriter = null)
     {
         if (InstanceActive.Value)
         {
@@ -53,7 +61,7 @@ public sealed class DebugLog : DiagnosticsLog
         // a trivial pass-through lambda (no branching, matches the "inert factory delegate"
         // exception to the no-lambdas-for-logic rule) still gets elided the same way in Release --
         // the call inside is stripped, leaving a no-op delegate.
-        return new DebugLog(write ?? (message => System.Diagnostics.Debug.WriteLine(message)));
+        return new DebugLog(write ?? (message => System.Diagnostics.Debug.WriteLine(message)), basePrintWriter);
     }
 
     public override void Dispose()

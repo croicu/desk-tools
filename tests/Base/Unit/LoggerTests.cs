@@ -1,20 +1,22 @@
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Base.Sinks;
-using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
-/// Logger.SetLogger mutates the sink stack, but that stack is now AsyncLocal-scoped (see
-/// Diagnostics.cs) rather than a process-wide static, so each test's own push/pop is isolated to
-/// its own logical call context and this class is safe to run in parallel with everything else.
+/// Logger.SetLogger mutates the sink list, but that list is AsyncLocal-scoped (see Logger.cs)
+/// rather than a process-wide static, so each test's own push/pop is isolated to its own logical
+/// call context and this class is safe to run in parallel with everything else -- including the
+/// two tests that used to need [DoNotParallelize] for redirecting the real Console.Out, now that
+/// they inject their own writer instead (see ConsoleLog.cs's DefaultWriterOverride and Create()'s
+/// writer parameter).
 /// </summary>
 [TestClass]
 public sealed class LoggerTests
 {
     /// <summary>
     /// Every call here that doesn't push its own sink lazily creates Logger's default
-    /// ConsoleLog (see Diagnostics.cs), which nothing here ever disposes -- reset after each
+    /// ConsoleLog (see Logger.cs), which nothing here ever disposes -- reset after each
     /// test so a leftover live default can't make some other test's own ConsoleLog.Create()
     /// throw, regardless of whether the test runner happens to reuse this logical call context.
     /// </summary>
@@ -43,20 +45,29 @@ public sealed class LoggerTests
     /// Proves Logger works with zero setup -- no ConsoleLog.Create()/SetLogger()/
     /// ConfigureConsole() call required to get correct output at the bootstrap defaults (Error
     /// shows, Info/Warning are suppressed, categories are unfiltered so any category can show).
-    /// Redirects Console.Out, which is process-wide with no per-context equivalent, so this one
-    /// method (unlike the rest of this class) can't run in parallel with anything else.
+    /// Exercises Logger's own lazily-created bootstrap sink (see Logger.cs's ActiveSinks()), which
+    /// calls ConsoleLog.Create() with no writer of its own to pass -- ConsoleLog.DefaultWriterOverride
+    /// lets this test observe that lazily-created sink's output without redirecting the real,
+    /// process-wide Console.Out, so (unlike before) this runs safely in parallel with everything
+    /// else.
     /// </summary>
     [TestMethod]
-    [DoNotParallelize]
     public void Log_WithNoSetup_UsesBootstrapConsoleDefaults()
     {
-        var output = ConsoleCapture.CaptureOut(() =>
+        var writer = new StringWriter();
+        ConsoleLog.DefaultWriterOverride.Value = writer;
+        try
         {
             Logger.Info("should be suppressed");
             Logger.Warning("should also be suppressed");
             Logger.Error("should print", "some-other-category");
-        });
+        }
+        finally
+        {
+            ConsoleLog.DefaultWriterOverride.Value = null;
+        }
 
+        var output = writer.ToString();
         Assert.DoesNotContain("should be suppressed", output);
         Assert.DoesNotContain("should also be suppressed", output);
         Assert.Contains("should print", output);
@@ -310,23 +321,24 @@ public sealed class LoggerTests
     /// Regression test for a real bug caught via a live smoke test of Hello with settings.debug=true:
     /// DebugLog didn't override Print(), so it inherited DiagnosticsLog's write-straight-to-Console
     /// behavior -- meaning Logger.Print() with a ConsoleLog and a DebugLog both active (the normal
-    /// debug-mode shape) wrote the same text to stdout twice. Redirects Console.Out, which is
-    /// process-wide, so this can't run in parallel with anything else that also does.
+    /// debug-mode shape) wrote the same text to stdout twice. Both sinks are constructed with their
+    /// own injected writer, so this runs safely in parallel with everything else instead of needing
+    /// to redirect the real, process-wide Console.Out.
     /// </summary>
     [TestMethod]
-    [DoNotParallelize]
     public void Print_WithConsoleAndDebugSinksBothActive_WritesToConsoleExactlyOnce()
     {
-        var consoleSink = ConsoleLog.Create();
+        var consoleWriter = new StringWriter();
+        var consoleSink = ConsoleLog.Create(writer: consoleWriter);
         var debugWritten = new List<string>();
         var debugSink = DebugLog.Create(debugWritten.Add);
         Logger.SetLogger(consoleSink);
         Logger.SetLogger(debugSink);
         try
         {
-            var output = ConsoleCapture.CaptureOut(() => Logger.Print("usage: desk-tools [--debug]"));
+            Logger.Print("usage: desk-tools [--debug]");
 
-            Assert.AreEqual("usage: desk-tools [--debug]" + Environment.NewLine, output);
+            Assert.AreEqual("usage: desk-tools [--debug]" + Environment.NewLine, consoleWriter.ToString());
             Assert.HasCount(1, debugWritten);
             Assert.AreEqual("usage: desk-tools [--debug]", debugWritten[0]);
         }
