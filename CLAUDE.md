@@ -162,7 +162,7 @@ Run these before every commit:
 ```bash
 dotnet format
 dotnet build
-dotnet test
+dotnet test --filter TestCategory!=Integration
 ```
 
 Then stop and wait for the user's review before actually running `git commit`/`git push` — see
@@ -189,8 +189,15 @@ dotnet run --project src/Service
 dotnet format
 
 # Test
-dotnet test
+dotnet test --filter TestCategory!=Integration
 dotnet test --filter "FullyQualifiedName=Croicu.Desk.Tools.Service.Tests.Unit.ProgramTests.Main_RunsClean"   # single test
+
+# Integration tests (tests/Desk/Integration/, [TestCategory("Integration")]) are excluded from the
+# default `dotnet test` above -- see Architecture convention 4. They're not self-contained: they
+# expect a real Service instance already running (e.g. `dotnet Service.dll` from
+# out/Debug/net10.0, or the scheduled task) on its real settings-resolved port, rather than
+# spinning one up themselves. Run them explicitly, with Service already started:
+dotnet test --filter TestCategory=Integration
 
 # Build the Windows MSI installer (Windows-only, WiX cannot build on non-Windows hosts at all --
 # see installer/Setup.wixproj). Not part of the `dotnet build`/`test` commands above;
@@ -229,6 +236,17 @@ dotnet build installer/Setup.wixproj
    the default invocation unless you also tag it with `[TestCategory("Integration")]` and run
    `dotnet test --filter TestCategory!=Integration` as the default/CI command instead — that filter
    applies uniformly across every test project in the solution in one invocation, not per-project.
+   **A cross-project integration test (one exercising two of this repo's own apps together, e.g.
+   `src/Desk` driving a real `src/Service`) lives in the *dependent* side's test suite — whichever
+   app actively initiates/drives the interaction — and is named after the *other*, counterpart app,
+   not the one whose test tree it's already sitting in** (avoids repeating information the folder
+   already conveys, same reasoning as the `Client`-not-`DeskClient` naming rule under Coding Style).
+   Concrete precedent: `tests/Desk/Integration/ServiceTests.cs` — `src/Desk` is the dependent side
+   (it starts a real `Service.exe` as a child process and drives it via its own `Program.Start`), so
+   the test lives under `tests/Desk`, named `ServiceTests` for the counterpart it exercises. This
+   placement also avoids a `ProjectReference` the *other* direction wouldn't otherwise need — putting
+   it under `tests/Service/Integration` instead would mean `Service.Tests` referencing `Desk.csproj`,
+   a coupling that doesn't exist anywhere else between the two apps.
 5. Prefer explicit, readable C# over clever abstractions.
 6. Prefer constructor/parameter injection over mocking this project's own internal classes
    (reflection-based fakes, e.g. via Moq/NSubstitute against a concrete type) in tests — e.g. a
