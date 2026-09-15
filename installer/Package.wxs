@@ -25,5 +25,88 @@
       </Directory>
     </StandardDirectory>
 
+    <!-- Registers Service.exe as a scheduled task instead of a Windows Service (SCM). WiX has no
+         native scheduled-task element, so this shells out to schtasks.exe via deferred custom
+         actions, the standard pattern for this (see tasks/wix-scheduled-task-authoring.md and
+         issue #19 for the full reasoning and the general reference this follows).
+
+         Runs at logon under the installing user's own interactive token (/ru "[LogonUser]" /it,
+         a standard MSI property, the login name of the user running the installer), at the
+         highest privilege level that account allows (/rl highest), deliberately not SYSTEM
+         (confirmed via issue #19): CLAUDE.md's Mission phrase "high privilege mode" describes what
+         Service itself is built to do once running, not a requirement that the scheduled task
+         registering it run as SYSTEM. [LogonUser] resolves to a bare username, not
+         DOMAIN\User, fine for local accounts; a domain-joined target machine may need it
+         qualified. Fires unconditionally on logon, no extra trigger conditions: Service already
+         self-manages its own lifecycle via settings.json's idleTimeout, so the task only needs to
+         ensure it's started, not supervise it further.
+
+         Impersonate="no" + Execute="deferred" is required so these run with the elevated
+         installer's own privileges (not the limited "impersonated user" context the UI sequence
+         normally runs under).
+
+         CreateScheduledTask's /tr value needs BOTH an outer quote pair (so the CreateProcess-level
+         argv parser that launches schtasks.exe treats the whole "[INSTALLFOLDER]Service.exe"
+         path, spaces and all, as one argument) AND a literal, backslash-escaped inner quote pair
+         (\"..\") wrapping the exe path within that, since schtasks.exe does its own re-parsing of
+         the /tr value it receives, splitting on the first space to separate "the executable" from
+         "its own arguments" unless it finds an embedded literal quote marking where the executable
+         name ends. Confirmed by testing: an outer-quote-only version installed fine (schtasks
+         exits 0, so Return="check" doesn't fail the install) but silently registered a broken
+         task, per "schtasks /query /tn Desk Tools Service /xml": Command was "C:\Program" and
+         Arguments was "Files\Desk Tools\Service.exe", split at the first space in "Program Files"
+         since the outer quotes get stripped by argv parsing before schtasks ever sees them, and it
+         had no embedded quote left to go by. An XML entity (&quot;) for the inner quote doesn't
+         work either, since it decodes to a bare quote with no backslash, producing two adjacent
+         literal quote characters (an even run, which argv parsing collapses to one literal quote
+         but also still ends the argument at the very next space) rather than the backslash-escaped
+         form argv parsing treats as "literal quote character, keep going."
+
+         Known limitation, not solved here (same caveat class as the LogonUser domain-qualification
+         note above): the NOT Installed / Installed AND REMOVE="ALL" condition pattern below doesn't
+         distinguish a genuine uninstall from a MajorUpgrade's automatic old-version removal step,
+         a known general WiX edge case. -->
+    <CustomAction Id="CreateScheduledTask"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='schtasks /create /tn "Desk Tools Service" /tr "\"[INSTALLFOLDER]Service.exe\"" /sc onlogon /rl highest /ru "[LogonUser]" /it /f'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <!-- Starts the task immediately after registering it, so Service is actually running right
+         after install completes rather than only from the user's next logon. Return="ignore": a
+         failure to start immediately isn't fatal to the install itself, since the task is still
+         registered and will run on the next logon regardless. -->
+    <CustomAction Id="StartScheduledTask"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='schtasks /run /tn "Desk Tools Service"'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Undo on rollback: deletes the task if a later install step fails after it was created. -->
+    <CustomAction Id="RollbackScheduledTask"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='schtasks /delete /tn "Desk Tools Service" /f'
+                  Execute="rollback"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Removes the task on a genuine uninstall (see the REMOVE="ALL" condition below, and the
+         known-limitation note above re: MajorUpgrade). -->
+    <CustomAction Id="RemoveScheduledTask"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand='schtasks /delete /tn "Desk Tools Service" /f'
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RollbackScheduledTask" Before="CreateScheduledTask" Condition="NOT Installed" />
+      <Custom Action="CreateScheduledTask" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="StartScheduledTask" After="CreateScheduledTask" Condition="NOT Installed" />
+      <Custom Action="RemoveScheduledTask" Before="RemoveFiles" Condition='Installed AND (REMOVE="ALL")' />
+    </InstallExecuteSequence>
+
   </Package>
 </Wix>

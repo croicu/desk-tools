@@ -94,6 +94,14 @@ none is currently in flight. `Program.cs` constructs one and calls `Run()` after
 Console attach/detach on Windows (`ServiceConsole` under `src/Service/Platform/`, implementing
 `Base`'s `IConsole`) is unrelated prior work -- see the `wingui-console-poc` history.
 
+`installer/Package.wxs` registers `Service.exe` as a Windows scheduled task (`"Desk Tools
+Service"`), not a formal Windows Service (SCM) -- deferred custom actions shelling out to
+`schtasks.exe`, since WiX has no native scheduled-task element (see
+`tasks/wix-scheduled-task-authoring.md` and [issue #19](https://github.com/croicu/desk-tools/issues/19)).
+Runs at the installing user's own logon (their interactive token, highest privilege that account
+allows), started immediately after install too rather than only from the next logon; cleaned up
+on rollback/genuine uninstall.
+
 `src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
 `docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
 requests from stdin in a loop until EOF (or a `stop` tool call, below) ends it, dispatches

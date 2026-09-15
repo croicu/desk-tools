@@ -54,21 +54,18 @@
     {
       "label": "uninstall-msi (Debug)",
       "type": "shell",
-      "options": {
-        "shell": {
-          "executable": "powershell.exe",
-          "args": ["-NoProfile", "-Command"]
-        }
-      },
-      "command": "if (Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Desk Tools' }) { msiexec /x release\\Debug\\Service.msi }",
+      "command": "msiexec",
+      "args": [
+        "/x",
+        "release\\Debug\\Service.msi"
+      ],
       "problemMatcher": []
     },
     {
       "label": "install-msi (Debug)",
       "type": "shell",
       "dependsOn": [
-        "build-msi (Debug)",
-        "uninstall-msi (Debug)"
+        "build-msi (Debug)"
       ],
       "dependsOrder": "sequence",
       "command": "msiexec",
