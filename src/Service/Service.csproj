@@ -18,10 +18,6 @@
     <ProjectReference Include="..\Base\Base.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="settings.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <!-- Platform-specific console handling (AllocConsole on Windows, no-op on Linux/Neutral):
        folders are opted OUT of the default glob, then opted back IN per-RID, one folder at a time.
        Neutral covers everything that isn't win-x64/linux-x64, notably RuntimeIdentifier unset
