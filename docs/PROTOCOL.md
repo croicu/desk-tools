@@ -6,7 +6,7 @@ CLI signature and file format schemas for `desk-tools`.
 
 <!-- Command name, arguments, flags, exit codes. -->
 
-Both `src/Service` (`desk-tools`) and `src/Hello` (`hello`) accept:
+`src/Service` (`desk-tools`), `src/Hello` (`hello`), and `src/Desk` (`desk`) all accept:
 
 - `--log <dir>` -- write a timestamped log file into `<dir>` (creating it if missing), in addition
   to whatever console/debug sinks are already active; overrides `settings.json`'s `logDir` if both
@@ -17,7 +17,8 @@ Both `src/Service` (`desk-tools`) and `src/Hello` (`hello`) accept:
 `--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
 `--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
 `--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
-it).
+it). `src/Desk` likewise accepts only `--log` today; an unrecognized argument exits 2, same as
+`src/Service`.
 
 ## MCP (`src/Hello`)
 
@@ -43,6 +44,17 @@ Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (P
 `id: null`. Not yet implemented: `resources`, `prompts`, `listChanged` notifications, pagination --
 this is intentionally minimal, a stepping stone toward the real dispatch work referenced in
 `docs/ARCHITECTURE.md`'s `Host` entry.
+
+## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
+
+Plain newline-delimited text, not JSON-RPC -- a stepping stone ahead of the real request/response
+framing referenced in `docs/ARCHITECTURE.md`'s `Host` entry ([issue #5](https://github.com/croicu/desk-tools/issues/5)).
+A client connects to `Host`'s loopback listener (port from `settings.json`'s `port`, see below),
+writes exactly one line, and reads exactly one line back: `Host` echoes whatever it read verbatim,
+then closes the connection. A client that sends nothing before closing its own end gets no reply,
+just a closed connection. `src/Desk` is this protocol's one client today: it sends a fixed line,
+prints whatever comes back, and exits -- no retry and no auto-starting `Host` if the connection
+fails, just a fast, clear error.
 
 ## File formats
 
@@ -86,3 +98,6 @@ module nor working-directory tier has a file, `Load()` falls back to restrictive
 - `logDir` (string, directory, default unset -- no file logging) -- installs a `FileLog` sink
   writing a timestamped log file into this directory; overridable per-invocation by `--log <dir>`
   (see the CLI section above). See `docs/ARCHITECTURE.md`'s `FileLog` entry.
+- `port` (number, default `51823`) -- loopback TCP port `src/Service`'s `Host` listens on and
+  `src/Desk` connects to (see the Echo protocol section above). Both processes read this from the
+  same shared settings.json, with no direct dependency between them beyond that.

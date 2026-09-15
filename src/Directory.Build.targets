@@ -6,20 +6,20 @@
        this Condition evaluates; a Directory.Build.props-based version of this same condition would
        silently never match, since OutputType isn't set yet at that import point. Scoped to Exe/
        WinExe outputs, so Base.csproj itself (a Library) is excluded; only Hello.csproj/
-       Service.csproj actually run these targets, and since they share one output folder
-       (src/Directory.Build.props' BaseOutputPath), each ends up copying the same repo-root files
-       into that same folder rather than the two colliding on a differently-sourced file.
+       Service.csproj/Desk.csproj actually run these targets, and since they share one output
+       folder (src/Directory.Build.props' BaseOutputPath), each ends up copying the same repo-root
+       files into that same folder rather than colliding on a differently-sourced file.
 
        Deliberately imperative Copy tasks, not declarative "None Include CopyToOutputDirectory"
        items: an item like that, even declared here rather than directly in Base.csproj, still
        propagates through ProjectReference to whatever references the owning project, and
-       Hello.Tests/Service.Tests both reference Hello.csproj/Service.csproj (for InternalsVisibleTo
-       access), so it leaked settings.json/settings.local.json into their own test bins too,
-       corrupting test isolation the same way putting the items directly in Base.csproj corrupted
-       every test project's isolation (see git history). A Copy task tied explicitly to $(OutDir)/
-       $(PublishDir) only ever touches the owning project's own output, never a referencing
-       project's, since there's no item for MSBuild's cross-project content-propagation machinery to
-       discover. -->
+       Hello.Tests/Service.Tests/Desk.Tests all reference their own app's csproj (for
+       InternalsVisibleTo access), so it leaked settings.json/settings.local.json into their own
+       test bins too, corrupting test isolation the same way putting the items directly in
+       Base.csproj corrupted every test project's isolation (see git history). A Copy task tied
+       explicitly to $(OutDir)/$(PublishDir) only ever touches the owning project's own output,
+       never a referencing project's, since there's no item for MSBuild's cross-project
+       content-propagation machinery to discover. -->
   <Target Name="CopySettingsToOutput" AfterTargets="Build" Condition="'$(OutputType)' == 'Exe' OR '$(OutputType)' == 'WinExe'">
     <!-- The real, committed default config, always copied. -->
     <Copy SourceFiles="$(MSBuildThisFileDirectory)..\settings.json" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />

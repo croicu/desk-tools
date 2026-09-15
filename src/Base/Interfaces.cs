@@ -61,6 +61,14 @@ public interface ISettingsProvider
     /// file name/path within it.
     /// </summary>
     string? LogDir { get; }
+
+    /// <summary>
+    /// Loopback TCP port the resident process's <c>Host</c> listens on. Lives here (rather than a
+    /// constant private to <c>src/Service</c>) so a separate client process (e.g. <c>src/Desk</c>)
+    /// can learn it from the same settings.json both processes already share, without taking a
+    /// <c>ProjectReference</c> on <c>Service.csproj</c> just to see one port number.
+    /// </summary>
+    int Port { get; }
 }
 
 /// <summary>

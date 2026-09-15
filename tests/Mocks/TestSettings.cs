@@ -22,4 +22,6 @@ public sealed class TestSettings : ISettingsProvider
     public int IdleTimeout { get; init; } = 600;
 
     public string? LogDir { get; init; }
+
+    public int Port { get; init; } = 51823;
 }
