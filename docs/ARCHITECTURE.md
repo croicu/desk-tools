@@ -92,10 +92,15 @@ port), an accept loop on a dedicated background thread that dispatches each conn
 thread pool via a named handler (reads at most one newline-delimited line and writes it straight
 back, then closes -- plain-text echo, still ahead of real JSON-RPC framing/dispatch), and a
 `System.Threading.Timer`-driven idle check that exits the process once no connection has been
-accepted for `Settings.IdleTimeout` and none is currently in flight. `Program.cs` constructs one
-and calls `Run()` after settings load. Console attach/detach on Windows (`ServiceConsole` under
-`src/Service/Platform/`, implementing `Base`'s `IConsole`) is unrelated prior work -- see the
-`wingui-console-poc` history.
+accepted for `Settings.IdleTimeout` and none is currently in flight. A client can also trigger
+shutdown directly by sending `Host.ShutdownCommand` instead of an ordinary line -- still echoed
+back first, then the exact same `_shutdownSignal` the idle-timeout check already sets gets set from
+the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join the
+accept thread) runs identically regardless of which of the two triggered it (see
+[issue #22](https://github.com/croicu/desk-tools/issues/22) -- deliberately one shutdown path, not
+two). `Program.cs` constructs one and calls `Run()` after settings load. Console attach/detach on
+Windows (`ServiceConsole` under `src/Service/Platform/`, implementing `Base`'s `IConsole`) is
+unrelated prior work -- see the `wingui-console-poc` history.
 
 `installer/Package.wxs` registers `Service.exe` as a Windows scheduled task (`"Desk Tools
 Service"`), not a formal Windows Service (SCM) -- deferred custom actions shelling out to
@@ -125,15 +130,24 @@ CLI flag of its own, `--log <dir>`
 `src/Desk/Program.cs`: a plain console client for `src/Service`'s `Host` -- connects to its
 loopback listener on `ISettingsProvider.Port` (the same shared settings.json `Host` itself reads,
 so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one
-newline-delimited line as an echo request, waits for the same line echoed back, prints it via
-`Logger.Print`, then exits. The actual connect/send/read exchange lives in `Client`
-(`src/Desk/Client.cs`), constructed with an optional port override (same pattern as `Host`'s own
-constructor) so a test can point it at a test-local peer instead of the real settings-resolved port.
-Fails fast, no retry and no auto-starting the service, via a plain `AppError` when the connection
-fails or closes before a reply arrives -- surfaced through the same `AppError`-to-exit-code-1
-handling every other app here already gets from `Context.Start`. No `IConsole` concerns of its own
-(an ordinary console app, already console-attached), hence its own `VoidConsole`, same reasoning as
-Hello's but for the opposite reason (Hello is headless; Desk is already attached).
+newline-delimited line, waits for the same line echoed back, and exits. Requires exactly one bare
+subcommand (`DeskCommand`, a verb -- not a `--`-prefixed flag, since the two are mutually
+exclusive): `ping` sends the fixed line `ping` and prints whatever comes back via `Logger.Print`;
+`shutdown` sends `Host.ShutdownCommand` (kept in sync by hand as its own literal, since Desk
+deliberately has no `ProjectReference` on `Service.csproj` to reference the real constant) and
+prints a fixed confirmation instead of the raw echoed text. `Start` forwards the parsed command into
+`Run` via a trivial forwarding lambda (`() => Run(arguments.Command)`, same pattern Hello's own
+`Start` already uses for its `input` parameter), since `Context.Start`'s `run` delegate is a plain
+`Func<int>`. The actual connect/send/read exchange lives in `Client` (`src/Desk/Client.cs`),
+constructed with an optional port override (same pattern as `Host`'s own constructor) so a test can
+point it at a test-local peer instead of the real settings-resolved port -- `Client` itself has no
+notion of "ping" vs "shutdown", it only ever sends one line and returns what comes back; the
+command's meaning is entirely `Host`'s to interpret, based on content. Fails fast, no retry and no
+auto-starting the service, via a plain `AppError` when the connection fails or closes before a
+reply arrives -- surfaced through the same `AppError`-to-exit-code-1 handling every other app here
+already gets from `Context.Start`. No `IConsole` concerns of its own (an ordinary console app,
+already console-attached), hence its own `VoidConsole`, same reasoning as Hello's but for the
+opposite reason (Hello is headless; Desk is already attached).
 
 ## Data flow
 

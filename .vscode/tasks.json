@@ -16,7 +16,17 @@
     {
       "label": "test",
       "type": "shell",
-      "command": "dotnet test",
+      "command": "dotnet test --filter TestCategory!=Integration",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "test-integration",
+      "type": "shell",
+      // Not self-contained -- expects a real Service instance already running (e.g. `dotnet
+      // Service.dll` from out/Debug/net10.0, or the scheduled task) on its real settings-resolved
+      // port. See tests/Desk/Integration/DeskIntegrationTests.cs and CLAUDE.md's Architecture
+      // convention 4.
+      "command": "dotnet test --filter TestCategory=Integration",
       "problemMatcher": "$msCompile"
     },
     {

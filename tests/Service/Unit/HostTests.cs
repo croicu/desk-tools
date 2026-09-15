@@ -76,6 +76,33 @@ public sealed class HostTests
     }
 
     [TestMethod]
+    public void AcceptLoop_ShutdownCommand_TriggersShutdownWithoutWaitingForIdleTimeout()
+    {
+        // A long idle timeout: if shutdown here actually waited on the idle timer instead of being
+        // triggered directly by the request, the bounded wait below would time out and fail.
+        var host = new Host(new TestSettings { IdleTimeout = 600 }, port: 0);
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine(Host.ShutdownCommand);
+
+            // Still echoed back first, same as any other line -- the client gets a definitive
+            // acknowledgment before the listener actually stops.
+            var reply = reader.ReadLine();
+            Assert.AreEqual(Host.ShutdownCommand, reply);
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down promptly after a shutdown request.");
+    }
+
+    [TestMethod]
     public void AcceptLoop_ConnectionWithNoLine_ClosesWithNoReply()
     {
         var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);

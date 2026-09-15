@@ -17,8 +17,10 @@ CLI signature and file format schemas for `desk-tools`.
 `--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
 `--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
 `--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
-it). `src/Desk` likewise accepts only `--log` today; an unrecognized argument exits 2, same as
-`src/Service`.
+it). `src/Desk` additionally requires exactly one bare subcommand, `ping` or `shutdown` (a verb --
+what Desk should do -- rather than a `--`-prefixed flag, since the two are mutually exclusive, not
+independent options); missing it, giving both, or any other unrecognized argument exits 2, same as
+`src/Service`. See the Echo protocol section below for what each subcommand sends.
 
 ## MCP (`src/Hello`)
 
@@ -52,9 +54,20 @@ framing referenced in `docs/ARCHITECTURE.md`'s `Host` entry ([issue #5](https://
 A client connects to `Host`'s loopback listener (port from `settings.json`'s `port`, see below),
 writes exactly one line, and reads exactly one line back: `Host` echoes whatever it read verbatim,
 then closes the connection. A client that sends nothing before closing its own end gets no reply,
-just a closed connection. `src/Desk` is this protocol's one client today: it sends a fixed line,
-prints whatever comes back, and exits -- no retry and no auto-starting `Host` if the connection
-fails, just a fast, clear error.
+just a closed connection. `src/Desk` is this protocol's one client today, with two subcommands (see
+the CLI section above):
+
+- `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits -- no retry and
+  no auto-starting `Host` if the connection fails, just a fast, clear error.
+- `desk shutdown` -- sends the reserved line `shutdown` (`Host.ShutdownCommand`), asking `Host` to
+  shut down gracefully once it has replied ([issue #22](https://github.com/croicu/desk-tools/issues/22)).
+  Still echoed back first like any other line, so Desk gets a definitive acknowledgment before the
+  listener actually stops; Desk itself just prints a fixed confirmation rather than the raw echoed
+  text. Shares `Host`'s existing idle-timeout shutdown path rather than a separate mechanism, so the
+  teardown itself (stop listening, join the accept thread) is identical either way. Known
+  limitation of this still-plain-text protocol: an ordinary `ping` whose payload happened to equal
+  the literal string `shutdown` would also trigger this -- acceptable today since Desk is the only
+  client and never sends arbitrary text, worth revisiting once real request framing lands.
 
 ## File formats
 
