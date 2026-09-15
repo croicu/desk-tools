@@ -280,19 +280,21 @@ dotnet build installer/Setup.wixproj
     default to `AsyncLocal` for anything else, even if `src/Service` (typically a
     single-tenant CLI) never itself exercises the multi-client scenario.
 
-    **Known gap, deliberately deferred**: `ConsoleLog` still writes straight to the actual OS
-    console (under `ConsoleLock`) from whichever client's context is logging — correct (no
-    interleaved/corrupted output, since every write is serialized through that lock) but not the
-    same as giving the console a single owning thread, which a real multi-client *server* host would
-    likely want. The intended eventual shape: an `IConsoleWriter` seam injected into
-    `ConsoleLog` (default implementation: write straight to `Console`, today's behavior; this is
-    the "rare, genuinely shared" exception noted above, since the queue feeding a real console has
-    to be one real shared instance handed to every client's sink, not `AsyncLocal`), with an
-    alternative implementation that enqueues formatted lines for a designated main thread to drain
-    and print via an explicit `Pump()` call the host makes at its own natural points (not a
-    background thread/timer inside `Base` — matches this project's explicit-over-magic style, see
-    "Explicit DI First" under Coding Style). **Not implemented** — noted here only so the idea isn't
-    lost, not as a rule to follow yet; revisit when a real multi-client host actually exists.
+    **Known gap, deliberately deferred**: `ConsoleLog` now takes an injectable `TextWriter` (see
+    `Create`'s `writer` parameter, defaulting to `Console.Out`) — but that seam exists purely for
+    testability (a test constructs a sink pointed at its own `StringWriter` instead of redirecting
+    the real, process-wide `Console.Out`), not for the harder production problem: `ConsoleLog` still
+    writes straight to the actual OS console (under `ConsoleLock`) from whichever client's context is
+    logging — correct (no interleaved/corrupted output, since every write is serialized through that
+    lock) but not the same as giving the console a single owning thread, which a real multi-client
+    *server* host would likely want. The intended eventual shape for that: an alternative writer
+    implementation that enqueues formatted lines for a designated main thread to drain and print via
+    an explicit `Pump()` call the host makes at its own natural points (not a background
+    thread/timer inside `Base` — matches this project's explicit-over-magic style, see "Explicit DI
+    First" under Coding Style; the queue itself would need to be one real shared instance handed to
+    every client's sink, not `AsyncLocal` — the "rare, genuinely shared" exception noted above).
+    **Not implemented** — noted here only so the idea isn't lost, not as a rule to follow yet;
+    revisit when a real multi-client host actually exists.
 11. **`src/Base` must work correctly on every platform .NET runs on (Windows, Linux, macOS), not
     just whichever one you happen to be developing on.** Base.dll is the reusable library layer any
     future host builds on (convention 7), so a platform-specific bug there blocks every consumer,

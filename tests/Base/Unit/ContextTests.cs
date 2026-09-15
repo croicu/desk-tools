@@ -127,23 +127,31 @@ public sealed class ContextTests
 
     /// <summary>
     /// Proves Create() wires settings.json's log level/categories into the console sink (not just
-    /// the debug sink) -- redirects Console.Out, which is process-wide with no per-context
-    /// equivalent, so this can't run in parallel with anything else that also does.
+    /// the debug sink). Create()'s internal Logger.ConfigureConsole call forces Logger's own
+    /// lazily-created bootstrap ConsoleLog into existence (see Logger.cs's ActiveSinks()), which
+    /// calls ConsoleLog.Create() with no writer of its own to pass -- ConsoleLog.DefaultWriterOverride
+    /// lets this test observe it without redirecting the real, process-wide Console.Out, so this
+    /// runs safely in parallel with everything else.
     /// </summary>
     [TestMethod]
-    [DoNotParallelize]
     public void Create_AppliesSettingsLogLevelToConsoleSink()
     {
         var settings = new TestSettings { LogLevel = TelemetryLevel.Warning };
-
-        Context.Create(settings);
-
-        var output = ConsoleCapture.CaptureOut(() =>
+        var writer = new StringWriter();
+        ConsoleLog.DefaultWriterOverride.Value = writer;
+        try
         {
+            Context.Create(settings);
+
             Logger.Info("quiet");
             Logger.Warning("audible");
-        });
+        }
+        finally
+        {
+            ConsoleLog.DefaultWriterOverride.Value = null;
+        }
 
+        var output = writer.ToString();
         Assert.DoesNotContain("quiet", output);
         Assert.Contains("audible", output);
     }

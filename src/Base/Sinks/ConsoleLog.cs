@@ -17,15 +17,30 @@ public sealed class ConsoleLog : DiagnosticsLog
     // creating one just because client A already has.
     private static readonly AsyncLocal<bool> InstanceActive = new();
 
+    /// <summary>
+    /// Test-only hook: overrides what <see cref="Create"/> defaults its writer to when a caller
+    /// doesn't pass one explicitly (the real default is <see cref="Console.Out"/>). Exists for
+    /// tests that exercise <see cref="Logger"/>'s own lazily-created bootstrap sink (see
+    /// <c>Logger.ActiveSinks</c>) -- that path calls <see cref="Create"/> with no arguments, so a
+    /// test can't pass a writer directly; setting this first lets it observe that lazily-created
+    /// sink's output without redirecting the real, process-wide <see cref="Console.Out"/>.
+    /// AsyncLocal so parallel tests don't clobber each other's override; production code never
+    /// touches this.
+    /// </summary>
+    internal static readonly AsyncLocal<TextWriter?> DefaultWriterOverride = new();
+
+    private readonly TextWriter _writer;
     private TelemetryLevel _minLevel;
     private List<string>? _categories;
     private List<string>? _excludedCategories;
 
-    private ConsoleLog(TelemetryLevel minLevel, List<string>? categories, List<string>? excludedCategories)
+    private ConsoleLog(TelemetryLevel minLevel, List<string>? categories, List<string>? excludedCategories, TextWriter writer)
+        : base(printWriter: writer)
     {
         _minLevel = minLevel;
         _categories = categories;
         _excludedCategories = excludedCategories;
+        _writer = writer;
     }
 
     /// <summary>
@@ -33,8 +48,14 @@ public sealed class ConsoleLog : DiagnosticsLog
     /// ConsoleLog may be live per logical call context at a time, so callers can't accidentally
     /// construct a second one (e.g. via a bare <c>new</c>) while the first is still installed there.
     /// Dispose the returned instance to allow creating another in that same context.
+    ///
+    /// <paramref name="writer"/> defaults to <see cref="Console.Out"/> (via
+    /// <see cref="DefaultWriterOverride"/>, itself defaulting to <see cref="Console.Out"/>) and
+    /// exists as an injectable seam per CLAUDE.md's "Explicit DI First" convention -- tests
+    /// construct a sink pointed at their own <see cref="StringWriter"/> instead of redirecting the
+    /// real console.
     /// </summary>
-    public static ConsoleLog Create(TelemetryLevel minLevel = TelemetryLevel.Error, List<string>? categories = null, List<string>? excludedCategories = null)
+    public static ConsoleLog Create(TelemetryLevel minLevel = TelemetryLevel.Error, List<string>? categories = null, List<string>? excludedCategories = null, TextWriter? writer = null)
     {
         if (InstanceActive.Value)
         {
@@ -42,7 +63,7 @@ public sealed class ConsoleLog : DiagnosticsLog
         }
 
         InstanceActive.Value = true;
-        return new ConsoleLog(minLevel, categories, excludedCategories);
+        return new ConsoleLog(minLevel, categories, excludedCategories, writer ?? DefaultWriterOverride.Value ?? Console.Out);
     }
 
     /// <summary>
@@ -88,7 +109,7 @@ public sealed class ConsoleLog : DiagnosticsLog
         {
             lock (ConsoleLock)
             {
-                Console.WriteLine($"[{level.ToString().ToUpperInvariant()}][{record.Category}] {record.Message}");
+                _writer.WriteLine($"[{level.ToString().ToUpperInvariant()}][{record.Category}] {record.Message}");
             }
         }
 

@@ -1,5 +1,4 @@
 using Croicu.Desk.Tools.Base.Sinks;
-using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
@@ -60,19 +59,22 @@ public sealed class DebugLogTests
     /// which writes straight to Console -- meaning a DebugLog fanned out alongside a "real" printing
     /// sink duplicated every Logger.Print() call onto stdout (caught via a live smoke test of Hello,
     /// where settings.debug=true made this concretely double-print every MCP response line).
-    /// Redirects Console.Out to prove nothing reaches it -- process-wide, so no parallel siblings.
+    /// DebugLog.Print() never actually calls the base's Print(), so passing our own StringWriter as
+    /// the base's printWriter (a test-only seam, see DebugLog.Create()'s own remarks) and asserting
+    /// it stayed empty proves the same thing ConsoleCapture-over-the-real-Console used to, without
+    /// redirecting it -- so this runs safely in parallel with everything else.
     /// </summary>
     [TestMethod]
-    [DoNotParallelize]
     public void Print_RoutesToInjectedTargetNotConsole()
     {
         var written = new List<string>();
-        var sink = DebugLog.Create(written.Add);
+        var baseChannel = new StringWriter();
+        var sink = DebugLog.Create(written.Add, basePrintWriter: baseChannel);
         try
         {
-            var output = ConsoleCapture.CaptureOut(() => sink.Print("raw text"));
+            sink.Print("raw text");
 
-            Assert.IsEmpty(output);
+            Assert.IsEmpty(baseChannel.ToString());
             Assert.HasCount(1, written);
             Assert.AreEqual("raw text", written[0]);
         }

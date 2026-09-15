@@ -52,6 +52,9 @@ public static class Program
     /// <summary>
     /// Testable entry point -- Main() just forwards here. settingsPath lets a test point at a
     /// fixture file instead of the real ./settings.json (same convention as Service's Program.cs).
+    /// input/output are injectable seams a test can pass instead of redirecting the real, process-
+    /// wide Console.In/Console.SetOut -- both default to null here (Console.In / the installed
+    /// DiagnosticsLog's own Console.Out default), matching Main()'s real behavior exactly.
     ///
     /// Installs a silent <see cref="DiagnosticsLog"/> sink before anything else can log --
     /// specifically before <see cref="Context.Start"/>'s internal <see cref="Settings.Load"/> call,
@@ -70,13 +73,13 @@ public static class Program
     /// does parse (see <see cref="ParseArgs"/>), since a persisted log file is often the only way to
     /// debug a stdio server that can never print to its own console.
     /// </summary>
-    internal static int Start(string[]? argv = null, string? settingsPath = null)
+    internal static int Start(string[]? argv = null, string? settingsPath = null, TextReader? input = null, TextWriter? output = null)
     {
-        Logger.SetLogger(new DiagnosticsLog());
+        Logger.SetLogger(new DiagnosticsLog(printWriter: output));
 
         var arguments = ParseArgs(argv ?? []);
 
-        return Context.Start(new VoidConsole(), "hello", settingsPath, debugOverride: false, arguments.LogDir, () => Run());
+        return Context.Start(new VoidConsole(), "hello", settingsPath, debugOverride: false, arguments.LogDir, () => Run(input));
     }
 
     /// <summary>
