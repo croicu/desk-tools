@@ -57,7 +57,14 @@
       "command": "msiexec",
       "args": [
         "/x",
-        "release\\Debug\\Service.msi"
+        // By ProductCode GUID (matches Package.wxs's pinned ProductCode), not by file path.
+        // msiexec /x <path-to-msi> compares that file's PackageCode -- which regenerates on every
+        // build, correctly, that's not a bug -- against what's actually cached from the original
+        // install, and fails with error 1638 ("Another version of this product is already
+        // installed") the moment they differ, even though ProductCode/Version still match.
+        // Targeting the GUID directly makes Windows Installer resolve its own cached copy instead,
+        // exactly like Add/Remove Programs' own uninstall entry does (see its UninstallString).
+        "{5cf17584-dad2-4667-a6a5-6020f6a95265}"
       ],
       "problemMatcher": []
     },

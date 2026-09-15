@@ -1,5 +1,6 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Desk Tools"
+  <Package ProductCode="$(var.ProductCode)"
+           Name="Desk Tools"
            Manufacturer="Croicu"
            Version="1.0.0.0"
            UpgradeCode="$(var.UpgradeCode)"
