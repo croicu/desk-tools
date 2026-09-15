@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Minimal, hand-rolled MCP server over stdio exposing Service's graceful shutdown as a tool.
+
+Mirrors src/Hello/Program.cs's own approach -- no MCP SDK, per this repo's convention of speaking
+JSON-RPC directly over each project's own transport. Verified against
+modelcontextprotocol.io/specification/2025-06-18/basic/transports (stdio) and basic/lifecycle, same
+protocol version support as src/Hello.
+
+Reuses shutdown_service.py's actual connect/send/read logic via a plain sibling import, rather than
+a third independent copy of it (Host.cs and src/Desk's Program.cs already each keep their own copy
+of the "shutdown" sentinel and port-resolution logic in sync by hand -- see
+docs/ARCHITECTURE.md's shutdown_service.py entry -- a fourth copy here would only make that worse).
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from shutdown_service import SHUTDOWN_COMMAND, find_repo_root, request_shutdown, resolve_port
+
+SUPPORTED_PROTOCOL_VERSION = "2025-06-18"
+SHUTDOWN_TOOL_NAME = "shutdown"
+
+PARSE_ERROR_CODE = -32700
+INVALID_REQUEST_CODE = -32600
+METHOD_NOT_FOUND_CODE = -32601
+INVALID_PARAMS_CODE = -32602
+INTERNAL_ERROR_CODE = -32603
+
+SHUTDOWN_INPUT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+
+
+def write_result(id_: Any, result: Any) -> None:
+    _write({"jsonrpc": "2.0", "id": id_, "result": result})
+
+
+def write_error(id_: Any, code: int, message: str) -> None:
+    _write({"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}})
+
+
+def _write(envelope: dict[str, Any]) -> None:
+    # stdout carries only valid MCP protocol lines -- same rule src/Hello/Program.cs follows, since
+    # the stdio transport requires it.
+    sys.stdout.write(json.dumps(envelope) + "\n")
+    sys.stdout.flush()
+
+
+def handle_initialize(id_: Any) -> None:
+    write_result(
+        id_,
+        {
+            "protocolVersion": SUPPORTED_PROTOCOL_VERSION,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "service-control", "version": "0.1.0"},
+        },
+    )
+
+
+def handle_tools_list(id_: Any) -> None:
+    write_result(
+        id_,
+        {
+            "tools": [
+                {
+                    "name": SHUTDOWN_TOOL_NAME,
+                    "description": (
+                        "Shuts down the Desk Tools Service resident process gracefully (sends the "
+                        "reserved shutdown line over its loopback TCP listener, waits for its "
+                        "acknowledgment). Only call this when explicitly asked to stop/restart the "
+                        "service -- never in response to an unrelated user message that happens to "
+                        "mention stopping something else."
+                    ),
+                    "inputSchema": SHUTDOWN_INPUT_SCHEMA,
+                }
+            ]
+        },
+    )
+
+
+def handle_tools_call(id_: Any, params: Any) -> None:
+    if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+        write_error(id_, INVALID_PARAMS_CODE, "Invalid params: 'name' is required.")
+        return
+
+    name = params["name"]
+    if name != SHUTDOWN_TOOL_NAME:
+        write_error(id_, INVALID_PARAMS_CODE, f"Unknown tool: {name}")
+        return
+
+    repo_root = find_repo_root(Path(__file__).parent)
+    port = resolve_port(repo_root)
+
+    try:
+        reply = request_shutdown(port)
+    except OSError as error:
+        # A runtime failure of the tool itself, not a malformed request -- isError: true on the
+        # tool result, not a JSON-RPC protocol-level error (matches docs/PROTOCOL.md's existing
+        # "unknown tool name is -32602, not isError: true" distinction, applied the other way).
+        write_result(
+            id_,
+            {
+                "content": [{"type": "text", "text": f"Could not connect to the service on port {port}: {error}"}],
+                "isError": True,
+            },
+        )
+        return
+
+    if reply != SHUTDOWN_COMMAND:
+        write_result(
+            id_,
+            {
+                "content": [{"type": "text", "text": f"Unexpected reply from service: {reply!r}"}],
+                "isError": True,
+            },
+        )
+        return
+
+    write_result(id_, {"content": [{"type": "text", "text": "Shutdown requested."}], "isError": False})
+
+
+def handle_line(line: str) -> None:
+    try:
+        request = json.loads(line)
+    except json.JSONDecodeError:
+        write_error(None, PARSE_ERROR_CODE, "Parse error")
+        return
+
+    id_present = "id" in request
+    id_ = request.get("id")
+    method = request.get("method")
+
+    if not isinstance(method, str):
+        if id_present:
+            write_error(id_, INVALID_REQUEST_CODE, "Invalid request: 'method' is required.")
+        return
+
+    if not id_present:
+        # A notification (e.g. notifications/initialized) -- consumed, no response ever sent.
+        return
+
+    params = request.get("params")
+
+    try:
+        if method == "initialize":
+            handle_initialize(id_)
+        elif method == "tools/list":
+            handle_tools_list(id_)
+        elif method == "tools/call":
+            handle_tools_call(id_, params)
+        else:
+            write_error(id_, METHOD_NOT_FOUND_CODE, f"Method not found: {method}")
+    except Exception as error:  # stdin is a system boundary -- same reasoning as src/Hello's own catch-all
+        write_error(id_, INTERNAL_ERROR_CODE, f"Internal error: {error}")
+
+
+def main() -> int:
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if line:
+            handle_line(line)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

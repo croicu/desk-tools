@@ -7,8 +7,9 @@ Modules, data flow, and contracts for `desk-tools`.
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Context/Errors/
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
      Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
-     minimal stdio MCP server, references Base.csproj), and src/Desk/ (a console client for
-     src/Service's Host, references Base.csproj): what it owns, what it depends on. -->
+     minimal stdio MCP server, references Base.csproj), src/Desk/ (a console client for
+     src/Service's Host, references Base.csproj), and scripts/ (standalone Python utilities outside
+     the .NET build entirely): what it owns, what it depends on. -->
 
 Base.dll is designed to be safe inside a service hosting multiple heterogeneous clients in one
 process, each "renting" its own `ExecutionContext` with independent settings/logging. See
@@ -148,6 +149,27 @@ reply arrives -- surfaced through the same `AppError`-to-exit-code-1 handling ev
 already gets from `Context.Start`. No `IConsole` concerns of its own (an ordinary console app,
 already console-attached), hence its own `VoidConsole`, same reasoning as Hello's but for the
 opposite reason (Hello is headless; Desk is already attached).
+
+`scripts/shutdown_service.py`: a standalone, plain-stdlib Python script that sends `Host` the same
+`shutdown` request `desk shutdown` does, for shutting the resident process down without the .NET
+toolchain involved. Outside `src/`/`tests/` entirely -- no build step, no project file, just a
+script -- so it necessarily duplicates a few things `src/Desk` already has rather than sharing them
+across languages: its own copy of the `"shutdown"` sentinel literal (kept in sync by hand with
+`Host.ShutdownCommand`, same as `src/Desk`'s own copy), and its own settings.json-reading logic
+(`port`, local overriding, default `51823` -- a deliberately simplified read of just the two
+repo-root files, not `Settings.cs`'s full module-tier/working-directory-tier merge, since that
+distinction doesn't apply to a script with a fixed location).
+
+`scripts/service_mcp_server.py`: a second, minimal, hand-rolled MCP server over stdio (see
+`docs/PROTOCOL.md`), registered in `.mcp.json` as `service` alongside `src/Hello`'s own `hello`
+entry -- same shape (no SDK, same protocol version, same error codes) but in Python rather than C#,
+exposing one tool, `shutdown`, that calls straight into `shutdown_service.py`'s own
+`find_repo_root`/`resolve_port`/`request_shutdown` via a plain sibling import (reusing that logic
+rather than a third independent copy of it). Lets an MCP client (e.g. a Claude Code session working
+in this repo) shut `Host` down as a normal tool call, the same way `src/Hello`'s own `stop` tool
+lets one gracefully stop Hello -- see the `stop-service` skill under `.claude/skills/` (mirroring
+the earlier `stop-hello` one), which calls `mcp__service__shutdown` instead of killing the process
+when a build is blocked by a locked `Service.dll`/`Base.dll`.
 
 ## Data flow
 

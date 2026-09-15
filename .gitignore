@@ -6,6 +6,8 @@ dist/
 /release/
 /publish/
 /publish-debug/
+__pycache__/
+*.pyc
 
 # FileLog output (settings.json's logDir / --log <dir>), when pointed at the repo root
 /Logs/
