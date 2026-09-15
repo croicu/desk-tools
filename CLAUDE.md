@@ -199,6 +199,13 @@ dotnet test --filter "FullyQualifiedName=Croicu.Desk.Tools.Service.Tests.Unit.Pr
 # spinning one up themselves. Run them explicitly, with Service already started:
 dotnet test --filter TestCategory=Integration
 
+# tests/Service's own real per-platform tests (tests/Service/Unit/Platform/, e.g.
+# SingletonGuardTests.cs's real Mutex contention/abandonment behavior) only compile in under an
+# explicit RID, mirroring src/Service/Service.csproj's own Platform/-selection -- the default
+# `dotnet test` above compiles the Neutral (no-op) variant instead. Run explicitly for the real
+# Windows behavior:
+dotnet test tests/Service/Service.Tests.csproj -r win-x64
+
 # Build the Windows MSI installer (Windows-only, WiX cannot build on non-Windows hosts at all --
 # see installer/Setup.wixproj). Not part of the `dotnet build`/`test` commands above;
 # Service.slnx does reference installer/Setup.vcxproj (a Solution Explorer-only shim

@@ -31,6 +31,19 @@ public static class Program
     public static int Run()
     {
         Logger.Info("desk-tools: started.");
+
+        using var guard = SingletonGuard.TryAcquire(out var abandoned);
+        if (guard is null)
+        {
+            Logger.Info("desk-tools: another instance is already running; exiting.");
+            return 0;
+        }
+
+        if (abandoned)
+        {
+            Logger.Warning("desk-tools: the previous instance's single-instance guard was abandoned (it likely crashed); proceeding anyway.");
+        }
+
         new Host(Settings.Current).Run();
         Logger.Info("desk-tools: completed.");
 

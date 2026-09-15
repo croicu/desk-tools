@@ -71,9 +71,17 @@ then closes the connection. A client that sends nothing before closing its own e
 just a closed connection. `src/Desk` is this protocol's main client, with two subcommands (see the
 CLI section above):
 
-- `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits -- no retry and
-  no auto-starting `Host` if the connection fails, just a fast, clear error.
-- `desk shutdown` -- sends the reserved line `shutdown` (`Host.ShutdownCommand`), asking `Host` to
+- `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits. If `Host` isn't
+  reachable, auto-starts it via the installed scheduled task (`schtasks /run /tn "Desk Tools
+  Service"`, see `docs/ARCHITECTURE.md`'s `ServiceLauncher` entry and
+  [issue #27](https://github.com/croicu/desk-tools/issues/27)) -- deliberately *not* a plain child
+  process, since `Host` is meant to run at the scheduled task's own elevated integrity level, not
+  Desk's own (typically lower) one -- then retries once. Only works once Service has actually been
+  installed via the MSI (the scheduled task must already be registered); fails with a clear error
+  otherwise, or if it never becomes reachable within the startup wait.
+- `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
+  running isn't an error worth auto-starting for). Sends the reserved line `shutdown`
+  (`Host.ShutdownCommand`), asking `Host` to
   shut down gracefully once it has replied ([issue #22](https://github.com/croicu/desk-tools/issues/22)).
   Still echoed back first like any other line, so Desk gets a definitive acknowledgment before the
   listener actually stops; Desk itself just prints a fixed confirmation rather than the raw echoed

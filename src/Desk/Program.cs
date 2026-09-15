@@ -16,8 +16,10 @@ public enum DeskCommand
 /// <summary>
 /// Console client for <c>src/Service</c>: connects to <c>Host</c>'s loopback TCP listener, sends one
 /// request line, waits for the reply, prints it, then exits -- see <see cref="Client"/> for the
-/// actual wire exchange and docs/PROTOCOL.md for the format. Fails fast (no retry, no auto-starting
-/// the service) with a clear error when the service isn't reachable, surfaced via the same
+/// actual wire exchange and docs/PROTOCOL.md for the format. <c>ping</c> auto-starts the service
+/// (see <see cref="ServiceLauncher"/>) if it isn't reachable, then retries once; <c>shutdown</c>
+/// stays fail-fast, no retry, no auto-start (shutting down something that isn't running isn't an
+/// error worth auto-starting for) -- both failure modes surface via the same
 /// <see cref="AppError"/>-to-exit-code-1 handling every other app in this repo already uses (see
 /// <see cref="Context.Start"/>).
 /// </summary>
@@ -56,7 +58,7 @@ public static class Program
         switch (command)
         {
             case DeskCommand.Ping:
-                Logger.Print(client.SendEcho(PingMessage));
+                Logger.Print(PingWithAutoStart(client));
                 break;
             case DeskCommand.Shutdown:
                 client.SendEcho(ShutdownCommand);
@@ -67,6 +69,41 @@ public static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Tries a normal ping first; only on failure does it fall back to starting the service and
+    /// retrying, rather than always paying the auto-start machinery's cost. The retry after a
+    /// successful auto-start is a plain, un-retried <see cref="Client.SendEcho"/> call -- if the
+    /// service somehow stops being reachable in the brief window between
+    /// <see cref="ServiceLauncher.StartAndWaitUntilReachable"/> confirming it and this final call,
+    /// that's a genuine failure worth surfacing as-is, not silently retried again.
+    /// </summary>
+    private static string PingWithAutoStart(Client client)
+    {
+        try
+        {
+            return client.SendEcho(PingMessage);
+        }
+        catch (AppError)
+        {
+            Logger.Info("desk: service not reachable; attempting to start it.");
+            ServiceLauncher.StartAndWaitUntilReachable(() => TryPing(client));
+            return client.SendEcho(PingMessage);
+        }
+    }
+
+    private static bool TryPing(Client client)
+    {
+        try
+        {
+            client.SendEcho(PingMessage);
+            return true;
+        }
+        catch (AppError)
+        {
+            return false;
+        }
     }
 
     /// <summary>
