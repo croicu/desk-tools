@@ -19,7 +19,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from shutdown_service import SHUTDOWN_COMMAND, find_repo_root, request_shutdown, resolve_port
+from shutdown_service import (
+    SHUTDOWN_COMMAND,
+    find_repo_root,
+    request_shutdown,
+    resolve_port,
+)
 
 SUPPORTED_PROTOCOL_VERSION = "2025-06-18"
 SHUTDOWN_TOOL_NAME = "shutdown"
@@ -30,7 +35,11 @@ METHOD_NOT_FOUND_CODE = -32601
 INVALID_PARAMS_CODE = -32602
 INTERNAL_ERROR_CODE = -32603
 
-SHUTDOWN_INPUT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+SHUTDOWN_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
 
 
 def write_result(id_: Any, result: Any) -> None:
@@ -102,7 +111,12 @@ def handle_tools_call(id_: Any, params: Any) -> None:
         write_result(
             id_,
             {
-                "content": [{"type": "text", "text": f"Could not connect to the service on port {port}: {error}"}],
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Could not connect to the service on port {port}: {error}",
+                    }
+                ],
                 "isError": True,
             },
         )
@@ -112,13 +126,24 @@ def handle_tools_call(id_: Any, params: Any) -> None:
         write_result(
             id_,
             {
-                "content": [{"type": "text", "text": f"Unexpected reply from service: {reply!r}"}],
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Unexpected reply from service: {reply!r}",
+                    }
+                ],
                 "isError": True,
             },
         )
         return
 
-    write_result(id_, {"content": [{"type": "text", "text": "Shutdown requested."}], "isError": False})
+    write_result(
+        id_,
+        {
+            "content": [{"type": "text", "text": "Shutdown requested."}],
+            "isError": False,
+        },
+    )
 
 
 def handle_line(line: str) -> None:
@@ -134,7 +159,9 @@ def handle_line(line: str) -> None:
 
     if not isinstance(method, str):
         if id_present:
-            write_error(id_, INVALID_REQUEST_CODE, "Invalid request: 'method' is required.")
+            write_error(
+                id_, INVALID_REQUEST_CODE, "Invalid request: 'method' is required."
+            )
         return
 
     if not id_present:
@@ -152,7 +179,11 @@ def handle_line(line: str) -> None:
             handle_tools_call(id_, params)
         else:
             write_error(id_, METHOD_NOT_FOUND_CODE, f"Method not found: {method}")
-    except Exception as error:  # stdin is a system boundary -- same reasoning as src/Hello's own catch-all
+    except Exception as error:  # noqa: BLE001 -- stdin is a system boundary (arbitrary client
+        # input), same reasoning as src/Hello/Program.cs's own catch-all: a single malformed-but-
+        # parseable request shouldn't take the whole server down. Exception (not BaseException)
+        # already excludes KeyboardInterrupt/SystemExit, so this is the correct Python idiom for
+        # that intent, not something to narrow further.
         write_error(id_, INTERNAL_ERROR_CODE, f"Internal error: {error}")
 
 
