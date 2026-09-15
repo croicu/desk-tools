@@ -26,4 +26,26 @@
     </None>
   </ItemGroup>
 
+  <!-- Mirrors src/Service/Service.csproj's own Platform/-selection exactly, so this test project's
+       compiled-in SingletonGuardTests.cs pairs with whichever SingletonGuard variant that
+       ProjectReference itself actually compiled for the same RID: Unit/Platform/Windows/ tests the
+       real Mutex-based guard (only meaningful under `dotnet test -r win-x64`), Unit/Platform/Neutral/
+       tests the no-op variant's contract (what the default, no-RID `dotnet test` actually exercises),
+       and Unit/Platform/Linux/ likewise for `-r linux-x64`. -->
+  <ItemGroup>
+    <Compile Remove="Unit/Platform/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <Compile Include="Unit/Platform/Windows/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <Compile Include="Unit/Platform/Linux/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != 'win-x64' AND '$(RuntimeIdentifier)' != 'linux-x64'">
+    <Compile Include="Unit/Platform/Neutral/**/*.cs" />
+  </ItemGroup>
+
 </Project>

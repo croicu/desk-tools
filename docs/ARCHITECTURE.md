@@ -99,9 +99,39 @@ back first, then the exact same `_shutdownSignal` the idle-timeout check already
 the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join the
 accept thread) runs identically regardless of which of the two triggered it (see
 [issue #22](https://github.com/croicu/desk-tools/issues/22) -- deliberately one shutdown path, not
-two). `Program.cs` constructs one and calls `Run()` after settings load. Console attach/detach on
-Windows (`ServiceConsole` under `src/Service/Platform/`, implementing `Base`'s `IConsole`) is
-unrelated prior work -- see the `wingui-console-poc` history.
+two). `Program.cs`'s `Run()` first acquires `SingletonGuard` (`src/Service/Platform/`) -- a
+named `Mutex` (`Local\Desk Tools Service`) guarding against a second `Host` racing for the same
+port (see [issue #27](https://github.com/croicu/desk-tools/issues/27)); if another instance already
+holds it, `Run()` logs and returns immediately, no `Host` constructed, no port bind attempted. Only
+then does it construct `Host` and call `Run()`. Console attach/detach on Windows (`ServiceConsole`,
+same `src/Service/Platform/` split) is unrelated prior work -- see the `wingui-console-poc` history.
+
+`src/Service/Platform/{Windows,Linux,Neutral}/SingletonGuard.cs`: the named-`Mutex` guard
+`Program.cs`'s `Run()` acquires before constructing `Host`, split across the same three
+platform folders `ServiceConsole` already uses (same class name/API shape in each, so `Program.cs`'s
+call site needs no conditional branch -- whichever folder `Service.csproj`'s RID-based `ItemGroup`s
+select is the only one actually compiled in). Only `Windows` has a real implementation; `Linux` and
+`Neutral` are no-ops that always "acquire" successfully -- not because a named `Mutex` is incapable
+on Linux (see the Windows variant's own remarks: it's genuinely cross-platform in .NET), but because
+there's nothing to guard *against* yet on a platform with no scheduled-task-equivalent resident
+process launcher wired up at all (the likely eventual mechanism there is a `systemd --user` service,
+the closest analog to the scheduled task -- both "start at login" and "trigger on demand", unlike
+cron's periodic-only model). `Local\`, not `Global\`, in the Windows variant -- sufficient for the
+actual threat (the scheduled task and any Desk-triggered auto-start both always run under the same
+interactively-logged-on user's own session) without needing `SeCreateGlobalPrivilege`, not
+guaranteed for every account this might run under. A crashed previous holder's abandoned mutex still
+hands over ownership there (`AbandonedMutexException`, caught and logged as a warning, not treated
+as a failure) -- no separate crash-detection scheme needed, a named `Mutex` gives that for free.
+Unlike `ServiceConsole`, which has no unit tests at all (verified live instead, since the default
+Neutral test build never exercises its real per-platform behavior), `SingletonGuard` gets its own
+matching test-side split: `tests/Service/Service.Tests.csproj` mirrors `Service.csproj`'s exact
+Platform/-selection ItemGroups (see that project file's own comment), so
+`tests/Service/Unit/Platform/Windows/SingletonGuardTests.cs` (real contention/abandonment behavior,
+only meaningful -- and only compiled at all -- under `dotnet test -r win-x64`) pairs with whichever
+`SingletonGuard` variant the `Service.csproj` `ProjectReference` itself actually compiled for that
+same RID, while `tests/Service/Unit/Platform/{Neutral,Linux}/SingletonGuardTests.cs` test the no-op
+variants' own documented contract under the default (no-RID) `dotnet test` and `-r linux-x64`
+respectively. See CLAUDE.md's Commands section for the exact `-r win-x64` invocation.
 
 `installer/Package.wxs` registers `Service.exe` as a Windows scheduled task (`"Desk Tools
 Service"`), not a formal Windows Service (SCM) -- deferred custom actions shelling out to
@@ -143,12 +173,30 @@ prints a fixed confirmation instead of the raw echoed text. `Start` forwards the
 constructed with an optional port override (same pattern as `Host`'s own constructor) so a test can
 point it at a test-local peer instead of the real settings-resolved port -- `Client` itself has no
 notion of "ping" vs "shutdown", it only ever sends one line and returns what comes back; the
-command's meaning is entirely `Host`'s to interpret, based on content. Fails fast, no retry and no
-auto-starting the service, via a plain `AppError` when the connection fails or closes before a
-reply arrives -- surfaced through the same `AppError`-to-exit-code-1 handling every other app here
-already gets from `Context.Start`. No `IConsole` concerns of its own (an ordinary console app,
-already console-attached), hence its own `VoidConsole`, same reasoning as Hello's but for the
-opposite reason (Hello is headless; Desk is already attached).
+command's meaning is entirely `Host`'s to interpret, based on content. A closed connection or
+failure to connect raises a plain `AppError`, surfaced through the same `AppError`-to-exit-code-1
+handling every other app here already gets from `Context.Start`. `shutdown` stays fail-fast there,
+no retry, no auto-start (shutting down something that isn't running isn't worth auto-starting for);
+`ping` instead falls back to `ServiceLauncher.StartAndWaitUntilReachable`
+(`src/Desk/ServiceLauncher.cs`) on that first failure, then retries once (see
+[issue #27](https://github.com/croicu/desk-tools/issues/27)). No `IConsole` concerns of its own (an
+ordinary console app, already console-attached), hence its own `VoidConsole`, same reasoning as
+Hello's but for the opposite reason (Hello is headless; Desk is already attached).
+
+`src/Desk/ServiceLauncher.cs`: runs the installed scheduled task (`schtasks /run /tn "Desk Tools
+Service"`) rather than launching `Service.dll` as a plain child process -- `Host` is meant to run at
+the scheduled task's own elevated integrity level (`installer/Package.wxs`'s `/rl highest`), and a
+plain `Process.Start` from Desk would instead run it at Desk's own (typically lower) integrity,
+defeating that. `schtasks /run` itself needs no elevation from the caller; Task Scheduler runs the
+task under its own configured principal regardless. Polls (a real `ping`, not just a raw TCP
+connect) until reachable or a bounded timeout elapses, throwing `AppError` either way on failure --
+including when Service was never installed at all (the scheduled task isn't registered), a
+deliberate limitation: silently falling back to an unprivileged spawn would be exactly the mistake
+this class exists to avoid. Distinct from `tests/Desk/Integration/ServiceTests.cs`'s own spawn logic
+despite the surface similarity -- that one launches `Service.dll` directly from the *test*
+assembly's own output folder (a different directory than Service's, so it walks up to the repo root
+and back down); this always goes through the scheduled task instead, and never needs to resolve
+`Service.dll`'s path itself at all.
 
 `scripts/shutdown_service.py`: a standalone, plain-stdlib Python script that sends `Host` the same
 `shutdown` request `desk shutdown` does, for shutting the resident process down without the .NET
