@@ -60,6 +60,18 @@ the previous key-by-key:
 3. `settings.local.json` in the current working directory -- a personal, gitignored override (see
    `.gitignore`) of the previous two.
 
+The checked-in module-tier `settings.json` (and an optional, gitignored `settings.local.json`)
+live at the **repo root**, not inside `src/Service/` or `src/Hello/` -- `src/Service` and
+`src/Hello` build into one shared output folder (`src/Directory.Build.props`' `BaseOutputPath`), so
+a single root-level pair avoids either app's own file silently clobbering the other's at that
+shared path. `src/Directory.Build.targets` copies both into each app's own `$(OutDir)` after
+`Build` (imperative `Copy` tasks, not a declarative `CopyToOutputDirectory` item -- the latter
+propagates through any `ProjectReference`, which would leak these files into every test project
+that references `Hello`/`Service` too) and `settings.json` alone into `$(PublishDir)` after
+`Publish` -- `settings.local.json` is deliberately never published, since
+`installer/Setup.wixproj` globs its entire publish output into the MSI and a developer's personal
+override must never ship there.
+
 A malformed module-tier or working-directory `settings.json` throws (`SettingsError`); a malformed
 `settings.local.json` is logged and ignored, since it's the optional/personal tier. If neither the
 module nor working-directory tier has a file, `Load()` falls back to restrictive defaults
