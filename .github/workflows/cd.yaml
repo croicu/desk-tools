@@ -26,8 +26,24 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      # Blocks the release on failure (runs before Publish/Archive/Release below) -- unlike CI's
+      # Test step, this one runs *with* Integration tests: it's the only place the actual built
+      # artifacts (as opposed to CI's Debug-configuration unit suite) get exercised end-to-end
+      # before something gets tagged as a release. tests/Desk/Integration/ServiceTests.cs finds its
+      # Service.dll under out/Release/net10.0/ (this job's plain `dotnet build` above, not the
+      # differently-shaped `dotnet publish` output below), and starts/pings/shuts it down itself --
+      # no separate Service instance needs to be running first.
+      - name: Integration test
+        run: dotnet test --no-build -c Release --settings mstest.runsettings --filter TestCategory=Integration
+
       - name: Publish
-        run: dotnet publish src/Service -c Release
+        run: dotnet publish src/Service -c Release --no-restore
 
       - name: Archive
         run: |
