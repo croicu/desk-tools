@@ -47,6 +47,20 @@ Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (P
 this is intentionally minimal, a stepping stone toward the real dispatch work referenced in
 `docs/ARCHITECTURE.md`'s `Host` entry.
 
+## MCP (`scripts/service_mcp_server.py`)
+
+Same shape as `src/Hello`'s server above (hand-rolled, no SDK, newline-delimited JSON-RPC 2.0 over
+stdio, protocol version `2025-06-18` only, same error codes) but in plain-stdlib Python instead of
+C#, and exposing Service's shutdown rather than Hello's own tools -- registered in `.mcp.json` as
+`service`.
+
+- `tools/list` -- one tool, `shutdown` (same empty `inputSchema` shape as `src/Hello`'s tools).
+- `tools/call` -- `shutdown` sends the Echo protocol's `shutdown` request to `Host` (see below) and
+  returns `{"content":[{"type":"text","text":"Shutdown requested."}],"isError":false}` on success.
+  Unlike `src/Hello`'s tools, this one can genuinely fail at runtime (`Host` isn't reachable) --
+  that's `isError: true` with an explanatory message, a tool-level failure, not a JSON-RPC protocol
+  error (an unknown tool *name* is still `-32602`, same distinction `src/Hello` already draws).
+
 ## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
 
 Plain newline-delimited text, not JSON-RPC -- a stepping stone ahead of the real request/response
@@ -54,8 +68,8 @@ framing referenced in `docs/ARCHITECTURE.md`'s `Host` entry ([issue #5](https://
 A client connects to `Host`'s loopback listener (port from `settings.json`'s `port`, see below),
 writes exactly one line, and reads exactly one line back: `Host` echoes whatever it read verbatim,
 then closes the connection. A client that sends nothing before closing its own end gets no reply,
-just a closed connection. `src/Desk` is this protocol's one client today, with two subcommands (see
-the CLI section above):
+just a closed connection. `src/Desk` is this protocol's main client, with two subcommands (see the
+CLI section above):
 
 - `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits -- no retry and
   no auto-starting `Host` if the connection fails, just a fast, clear error.
@@ -66,8 +80,15 @@ the CLI section above):
   text. Shares `Host`'s existing idle-timeout shutdown path rather than a separate mechanism, so the
   teardown itself (stop listening, join the accept thread) is identical either way. Known
   limitation of this still-plain-text protocol: an ordinary `ping` whose payload happened to equal
-  the literal string `shutdown` would also trigger this -- acceptable today since Desk is the only
-  client and never sends arbitrary text, worth revisiting once real request framing lands.
+  the literal string `shutdown` would also trigger this -- acceptable today since neither of this
+  protocol's clients ever sends arbitrary/user-supplied text, worth revisiting once real request
+  framing lands.
+
+`scripts/shutdown_service.py` is a second, standalone client -- plain-stdlib Python (`socket`/
+`json`/`argparse`, no dependencies), for shutting `Host` down without the .NET toolchain involved.
+Resolves the port the same way (`settings.json`/`settings.local.json`'s `port`, local overriding,
+default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` sentinel is
+kept in sync by hand with `Host.ShutdownCommand`, same as `src/Desk`'s.
 
 ## File formats
 
