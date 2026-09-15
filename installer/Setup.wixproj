@@ -9,6 +9,23 @@
          literal placeholder below: Windows Installer uses UpgradeCode to identify a product
          family for upgrade detection, so two different products sharing one would collide. -->
     <UpgradeCode>{20db6e52-e895-490b-8208-ef74d76e901d}</UpgradeCode>
+    <!-- Package.wxs's own ProductCode is pinned to this fixed GUID instead of the WiX default
+         (omitting it mints a fresh random ProductCode on every build). A real release process is
+         supposed to mint a new ProductCode alongside a version bump, but this project's Version is
+         hardcoded 1.0.0.0 in both configurations (no bump-on-release story exists yet), so an
+         unpinned ProductCode meant every single `dotnet build installer/Setup.wixproj` produced a
+         "different product, identical version" under the same UpgradeCode, and MajorUpgrade's
+         default AllowSameVersionUpgrades="false" doesn't know how to reconcile that, so a reinstall
+         attempt (via REINSTALL=ALL, or even a plain `msiexec /i` rerun without uninstalling the old
+         ProductCode first) silently no-ops instead of replacing the old install. This stayed
+         invisible for as long as every reinstall went through an uninstall first (removing the old
+         ProductCode makes the new one's identity irrelevant), confirmed the hard way testing a
+         forced-reinstall dev-loop shortcut (REINSTALL=ALL/REINSTALLMODE=amus), which specifically
+         needs Windows Installer to recognize "the product I'm installing" and "the product already
+         installed" as the same one. If a real version-bump-per-release story is ever added, revisit
+         whether this should go back to being release-build-specific
+         ($(var.Configuration)-conditioned) instead of unconditionally pinned. -->
+    <ProductCode>{5cf17584-dad2-4667-a6a5-6020f6a95265}</ProductCode>
     <AppPublishDir>$(MSBuildThisFileDirectory)obj\publish\</AppPublishDir>
     <!-- Exposes the properties above to Package.wxs as WiX preprocessor variables ($(var.Name)):
          WixToolset.Sdk doesn't forward arbitrary MSBuild properties into the compiler on its own.
@@ -16,7 +33,7 @@
          itself from the MSBuild property of the same name; redeclaring it hits WIX0288. Package.wxs
          uses that predefined variable to decide whether to bundle .pdb files (Debug: yes, for local
          debugging against the installed copy; Release: no, matching today's shipped artifact). -->
-    <DefineConstants>UpgradeCode=$(UpgradeCode)</DefineConstants>
+    <DefineConstants>UpgradeCode=$(UpgradeCode);ProductCode=$(ProductCode)</DefineConstants>
     <!-- TargetName defaults to the project's own file name (Setup): override so the shipped
          installer is named Service.msi. -->
     <TargetName>Service</TargetName>
