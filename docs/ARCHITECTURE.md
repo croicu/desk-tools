@@ -316,6 +316,27 @@ MCP"`, no `find_repo_root`/settings-reading logic needed since it has no Service
 of its own. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
 real Python process) and by `tests/Service/Integration/GoodbyeTests.cs`.
 
+`src/Base/DevRedirect.cs`: lets an *installed* `Service.exe`/`Desk.exe` under Program Files hand
+off to a local dev build without the installed copy's own folder ever being touched -- the earlier
+approach `scripts/link-program-files.py` originally took (rename `C:\Program Files\Desk Tools` to
+`Desk Tools.bak`, junction the whole folder) fought Windows the entire way: a running process's own
+current directory (`src/Service/ToolLauncher.cs` sets every launched tool's own cwd to the
+registry's own directory, which for this specific tool *was* `C:\Program Files\Desk Tools` itself)
+implicitly locks that same directory against rename (`WinError 32`, reproduced and confirmed
+independent of elevation -- a single process with its own cwd set to a directory cannot rename that
+directory, full permissions or not), and even past that fix, the real elevated Service still hit an
+unexplained `WinError 5` renaming its own live install folder. `DevRedirect.TryHandoff(exeName,
+args)` -- called as the very first thing each app's own `Main` does, before any settings/logging
+setup -- checks for a `.dev` subfolder junction next to the running exe (created by
+`link-program-files.py`'s current, much smaller job: just that one subfolder junction, never a
+rename of anything) and, if present, re-spawns the identically-named exe from inside it (inheriting
+this process's own stdio untouched -- critical for `desk mcp <name>`'s stdio proxying), waits for
+it, and returns its exit code for the caller to relay immediately. Deliberately does not set the
+respawned process's own `WorkingDirectory` to `.dev` itself, for the same cwd-lock reason above --
+that would just relocate the same self-referential lock onto `unlink-program-files.py`'s own
+`rmdir` of `.dev` (see that script's own remarks, which still needs its own `chdir` guard for
+exactly this).
+
 `src/Service/ToolLauncher.cs`/`ToolProcess.cs` (see
 [issue #30](https://github.com/croicu/desk-tools/issues/30)): the process+pipes primitive
 `McpToolLauncher`/`HandleDuplicator` are built on. `ToolLauncher.Launch` is a generic
