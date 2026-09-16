@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Croicu.Desk.Tools.Base;
 
 namespace Croicu.Desk.Tools.Desk;
@@ -28,6 +29,10 @@ internal sealed class Client
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Omits "params" entirely for a no-params request (ping/shutdown) rather than serializing
+        // a literal "params": null -- Host's own dispatch treats both the same way (an absent
+        // "params" is just an empty JsonElement), but the wire text stays cleaner.
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     // See Host.WriteEncoding's own remarks -- same reasoning, same fix, on this exchange's other
@@ -55,6 +60,31 @@ internal sealed class Client
     /// </summary>
     public string Send(string method)
     {
+        var replyLine = SendRequest(method, paramsObject: null);
+        var result = ParseResultElement(replyLine);
+        return result.GetString() ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Sends an <c>mcp</c> request for the registry tool named <paramref name="name"/>, with this
+    /// process's own PID as the target for Service's <c>DuplicateHandle</c>-based handoff (see
+    /// docs/PROTOCOL.md's <c>mcp</c> method, [issue #32](https://github.com/croicu/desk-tools/issues/32))
+    /// -- returns the two duplicated handle values from the result, ready for
+    /// <see cref="McpProxy.Run"/> to open. Same fail-fast <see cref="AppError"/> conventions as
+    /// <see cref="Send"/>.
+    /// </summary>
+    public (long Stdin, long Stdout) LaunchMcpTool(string name)
+    {
+        var replyLine = SendRequest("mcp", new McpParams(name, Environment.ProcessId));
+        var result = ParseResultElement(replyLine);
+
+        var stdin = long.Parse(result.GetProperty("stdin").GetString()!);
+        var stdout = long.Parse(result.GetProperty("stdout").GetString()!);
+        return (stdin, stdout);
+    }
+
+    private string SendRequest(string method, object? paramsObject)
+    {
         Logger.Info($"desk: connecting to 127.0.0.1:{Port}.", Category);
 
         using var client = new TcpClient();
@@ -71,7 +101,7 @@ internal sealed class Client
         using var writer = new StreamWriter(stream, WriteEncoding) { NewLine = "\n", AutoFlush = true };
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
-        var request = new RequestEnvelope(Jsonrpc: "2.0", Id: RequestId, Method: method);
+        var request = new RequestEnvelope(Jsonrpc: "2.0", Id: RequestId, Method: method, Params: paramsObject);
         writer.WriteLine(JsonSerializer.Serialize(request, SerializerOptions));
         Logger.Info($"desk: sent request: method={method}", Category);
 
@@ -82,10 +112,17 @@ internal sealed class Client
         }
 
         Logger.Info($"desk: received reply: {replyLine}", Category);
-        return ParseResult(replyLine);
+        return replyLine;
     }
 
-    private static string ParseResult(string replyLine)
+    /// <summary>
+    /// Parses a reply line into its <c>result</c> element -- throws <see cref="AppError"/> on
+    /// malformed JSON, a JSON-RPC error response, or a reply with neither <c>result</c> nor
+    /// <c>error</c>. <see cref="JsonElement.Clone"/> because the backing <see cref="JsonDocument"/>
+    /// is disposed before this returns; without cloning, the returned element would become invalid
+    /// the moment the caller tries to read it.
+    /// </summary>
+    private static JsonElement ParseResultElement(string replyLine)
     {
         JsonDocument doc;
         try
@@ -113,9 +150,11 @@ internal sealed class Client
                 throw new AppError($"reply had neither 'result' nor 'error': {replyLine}", Category);
             }
 
-            return resultElement.GetString() ?? string.Empty;
+            return resultElement.Clone();
         }
     }
 
-    private sealed record RequestEnvelope(string Jsonrpc, int Id, string Method);
+    private sealed record RequestEnvelope(string Jsonrpc, int Id, string Method, object? Params = null);
+
+    private sealed record McpParams(string Name, int ProcessId);
 }

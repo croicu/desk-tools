@@ -9,12 +9,12 @@ namespace Croicu.Desk.Tools.Service.Tests.Integration;
 
 /// <summary>
 /// Exercises <see cref="McpToolLauncher"/> against the real, build-generated <c>hello</c> registry
-/// entry (<c>out/&lt;Configuration&gt;/net10.0/mcp-registry/hello.json</c>, see issue #29) and the
-/// real <c>Hello.exe</c>/<c>Hello.dll</c> it points at -- confirms the redirected stdin/stdout pipes
-/// actually carry working MCP traffic, not just that a process object exists (issue #30's own
-/// verification plan). Named for its counterpart (<c>Hello</c>), not repeating "Service" -- this
-/// already lives under Service's own test tree, same reasoning as <c>Client</c> (not
-/// <c>DeskClient</c>) in CLAUDE.md's Coding Style, and precedent set by
+/// entry (<c>out/&lt;Configuration&gt;/net10.0/[win-x64/]mcp-registry/hello.json</c>, see issue #29)
+/// and the real <c>Hello.exe</c>/<c>Hello.dll</c> it points at -- confirms the redirected
+/// stdin/stdout pipes actually carry working MCP traffic, not just that a process object exists
+/// (issue #30's own verification plan). Named for its counterpart (<c>Hello</c>), not repeating
+/// "Service" -- this already lives under Service's own test tree, same reasoning as <c>Client</c>
+/// (not <c>DeskClient</c>) in CLAUDE.md's Coding Style, and precedent set by
 /// <c>tests/Desk/Integration/ServiceTests.cs</c>. Stays under <c>tests/Service</c> rather than
 /// requiring a <c>ProjectReference</c> on <c>Hello.csproj</c> -- <see cref="McpToolLauncher"/>'s own
 /// <c>registryBaseDirectory</c> testing seam is enough to point it at the real output folder,
@@ -32,7 +32,7 @@ public sealed class HelloTests
     [TestMethod]
     public void Launch_RealHelloEntry_InitializeRequestGetsARealResponse()
     {
-        var outDir = ResolveSharedOutDir();
+        var outDir = ResolveOutDir();
         var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
         Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build`).");
 
@@ -58,34 +58,26 @@ public sealed class HelloTests
     /// Desk) direct <c>DuplicateHandle</c>-based access to its stdin/stdout -- then a real
     /// <c>initialize</c> request/response over those duplicated handles, not Host's own pipes.
     /// Windows-only (the actual mechanism is), guarded at runtime with <see cref="Assert.Inconclusive"/>
-    /// rather than a compile-time Platform/ split: unlike <c>Unit/Platform/Windows/HandleDuplicatorTests.cs</c>,
-    /// this test's other precondition (the real, build-generated <c>hello</c> registry entry) has
-    /// nothing to do with the RID <c>Service.Test.csproj</c> itself was built for, so a full
-    /// Integration+Platform combined folder structure isn't worth building for one test -- run with
-    /// `dotnet test --filter TestCategory=Integration -r win-x64` to actually exercise the real path
-    /// (the plain `-r win-x64` without an explicit RID still compiles/runs this method, but Host's
-    /// own <c>mcp</c> dispatch would fall through to <c>Platform/Neutral/HandleDuplicator.cs</c>'s
-    /// "not supported" throw instead of the real one, since <c>Service.csproj</c> itself wasn't
-    /// built for win-x64 in that case).
+    /// rather than a compile-time Platform/ split: this test's other precondition (the real,
+    /// build-generated <c>hello</c> registry entry) has nothing to do with the RID
+    /// <c>Service.Tests.csproj</c> itself was built for, so a full Integration+Platform combined
+    /// folder structure isn't worth building for one test. win-x64 is src/Directory.Build.props'
+    /// own default now, so this passes on a plain `dotnet test` -- the guard only actually fires if
+    /// someone deliberately overrides to a different RID (where <c>Service.dll</c> would link
+    /// against <c>Platform/Neutral/HandleDuplicator.cs</c>'s "not supported" throw instead).
     /// </summary>
     [TestMethod]
     public void Mcp_RealHelloEntry_DuplicatedHandlesCarryARealInitializeExchange()
     {
-        // OperatingSystem.IsWindows() alone isn't enough: it reports the actual OS, not which
-        // Platform/ variant got compiled into the referenced Service.dll -- running this test on a
-        // real Windows machine but built with no RID still links against
-        // Platform/Neutral/HandleDuplicator.cs's "not supported" throw. The RID build lands in a
-        // .../net10.0/win-x64/ subfolder (see FindConfigurationFolder's own remarks), so its name is
-        // a reliable proxy for "was I actually built for win-x64".
-        if (!OperatingSystem.IsWindows() || new DirectoryInfo(AppContext.BaseDirectory).Name != "win-x64")
+        var outDir = ResolveOutDir();
+        if (!string.Equals(new DirectoryInfo(outDir).Name, "win-x64", StringComparison.OrdinalIgnoreCase))
         {
-            Assert.Inconclusive("This test needs the real Windows HandleDuplicator, only compiled into Service.dll when built for win-x64 -- run with `dotnet test tests/Service/Service.Tests.csproj -r win-x64`. See issue #32.");
+            Assert.Inconclusive($"This test needs the real Windows HandleDuplicator -- win-x64 is src/Directory.Build.props' own default, but this build resolved to '{outDir}'. See issue #32.");
             return;
         }
 
-        var outDir = ResolveSharedOutDir();
         var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
-        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build -r win-x64`).");
+        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build`).");
 
         var host = new Host(new TestSettings { IdleTimeout = 5 }, port: 0, mcpRegistryBaseDirectory: outDir);
         host.Start();
@@ -141,26 +133,33 @@ public sealed class HelloTests
     }
 
     /// <summary>
-    /// out/&lt;Configuration&gt;/net10.0/ -- shared by every app project (see
-    /// src/Directory.Build.props' BaseOutputPath), so this is where both Hello.dll and its own
-    /// generated mcp-registry/hello.json land. Mirrors
-    /// tests/Desk/Integration/ServiceTests.cs's own ResolveServiceDllPath/FindRepoRoot approach:
-    /// walks up from the test assembly's own directory looking for Service.slnx, robust to the exact
-    /// bin/obj folder depth.
+    /// Mirrors this test assembly's own <c>net10.0[/&lt;RID&gt;]</c> structure onto
+    /// <c>out/&lt;Configuration&gt;/net10.0/</c>, since src/Directory.Build.props and
+    /// tests/Directory.Build.props apply the identical default <c>RuntimeIdentifier</c> (win-x64
+    /// today -- see src/Directory.Build.props' own remarks) -- whatever RID segment (if any) this
+    /// test itself landed under is exactly what Hello.csproj's own build landed under too, so this
+    /// stays correct if that default ever changes or gets overridden (e.g. `dotnet test -r
+    /// linux-x64`), rather than hardcoding "win-x64" as a literal path segment. Mirrors
+    /// tests/Desk/Integration/ServiceTests.cs's own identical helper.
     /// </summary>
-    private static string ResolveSharedOutDir()
+    private static string ResolveOutDir()
     {
-        var configuration = FindConfigurationFolder(new DirectoryInfo(AppContext.BaseDirectory));
-        return Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
+        var testDir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? ridSegment = null;
+        if (!string.Equals(testDir.Name, "net10.0", StringComparison.OrdinalIgnoreCase))
+        {
+            ridSegment = testDir.Name;
+            testDir = testDir.Parent!;
+        }
+
+        var configuration = FindConfigurationFolder(testDir);
+        var outDir = Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
+        return ridSegment is null ? outDir : Path.Combine(outDir, ridSegment);
     }
 
     /// <summary>
     /// Walks up looking for a folder literally named "Debug"/"Release", rather than assuming a
-    /// fixed parent-hop count -- normally tests/Service/bin/Debug/net10.0/, but
-    /// tests/Service/bin/Debug/net10.0/win-x64/ when this test project itself is built with an
-    /// explicit RuntimeIdentifier (see <see cref="Mcp_RealHelloEntry_DuplicatedHandlesCarryARealInitializeExchange"/>'s
-    /// own remarks on why that's needed here), which would otherwise make the immediate parent's
-    /// name "net10.0" instead of the actual configuration.
+    /// fixed parent-hop count -- robust regardless of how many RID/net10.0 segments sit above it.
     /// </summary>
     private static string FindConfigurationFolder(DirectoryInfo start)
     {

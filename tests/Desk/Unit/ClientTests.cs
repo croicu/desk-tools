@@ -73,6 +73,76 @@ public sealed class ClientTests
         Assert.ThrowsExactly<AppError>(() => client.Send("ping"));
     }
 
+    [TestMethod]
+    public void LaunchMcpTool_ReturnsHandlesFromResult_AndSendsNameAndOwnProcessId()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        string? capturedRequest = null;
+        var peerTask = Task.Run(() =>
+        {
+            using var peer = listener.AcceptTcpClient();
+            using var stream = peer.GetStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
+
+            capturedRequest = reader.ReadLine();
+            writer.WriteLine("""{"jsonrpc": "2.0", "id": 1, "result": {"stdin": "684", "stdout": "688"}}""");
+        });
+
+        try
+        {
+            var client = new Client(new TestSettings(), port: port);
+            var (stdin, stdout) = client.LaunchMcpTool("hello");
+
+            Assert.IsTrue(peerTask.Wait(BoundedWait), "Peer task did not complete within the bounded wait.");
+            Assert.AreEqual(684L, stdin);
+            Assert.AreEqual(688L, stdout);
+
+            Assert.IsNotNull(capturedRequest);
+            StringAssert.Contains(capturedRequest, "\"name\":\"hello\"");
+            StringAssert.Contains(capturedRequest, $"\"processId\":{Environment.ProcessId}");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public void LaunchMcpTool_PeerReturnsJsonRpcError_ThrowsAppError()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var peerTask = Task.Run(() =>
+        {
+            using var peer = listener.AcceptTcpClient();
+            using var stream = peer.GetStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
+
+            reader.ReadLine();
+            writer.WriteLine("""{"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "no registered MCP tool named 'no-such-tool'"}}""");
+        });
+
+        try
+        {
+            var client = new Client(new TestSettings(), port: port);
+
+            var error = Assert.ThrowsExactly<AppError>(() => client.LaunchMcpTool("no-such-tool"));
+            StringAssert.Contains(error.Message, "no-such-tool");
+            Assert.IsTrue(peerTask.Wait(BoundedWait), "Peer task did not complete within the bounded wait.");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     private static string ExchangeWithPeer(string method, string replyLine)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
