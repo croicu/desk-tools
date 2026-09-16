@@ -82,6 +82,12 @@ def link_program_files() -> str:
             "unlink_program_files) before linking again."
         )
 
+    # Service launches this script with its own current working directory set to LIVE_DIR (see
+    # src/Service/ToolLauncher.cs's WorkingDirectory) -- Windows implicitly locks a process's own
+    # CWD, so renaming LIVE_DIR out from under ourselves fails with WinError 32 ("used by another
+    # process") unless we step out of it first.
+    os.chdir(os.path.dirname(LIVE_DIR))
+
     os.rename(LIVE_DIR, BACKUP_DIR)
     try:
         subprocess.run(

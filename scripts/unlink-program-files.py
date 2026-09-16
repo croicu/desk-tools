@@ -65,6 +65,12 @@ def unlink_program_files() -> str:
     if not os.path.isdir(BACKUP_DIR):
         raise RuntimeError(f"No backup found at '{BACKUP_DIR}' -- cannot restore.")
 
+    # Service launches this script with its own current working directory set to LIVE_DIR (see
+    # src/Service/ToolLauncher.cs's WorkingDirectory) -- Windows implicitly locks a process's own
+    # CWD, so removing LIVE_DIR out from under ourselves fails with WinError 32 ("used by another
+    # process") unless we step out of it first. See link-program-files.py's own remarks.
+    os.chdir(os.path.dirname(LIVE_DIR))
+
     # rmdir on a junction/reparse-point directory removes just the reparse point itself, not the
     # real build output it points at -- never shutil.rmtree here, that would recurse into the
     # target and delete the actual out/ folder.
