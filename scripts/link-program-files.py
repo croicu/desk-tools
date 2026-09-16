@@ -2,9 +2,11 @@
 """Minimal, hand-rolled MCP server over stdio exposing a single link_program_files tool.
 
 Backs up the real, MSI-installed "C:\\Program Files\\Desk Tools" to "Desk Tools.bak" and replaces
-it with a directory junction into this script's own deployed folder (out/<Configuration>/net10.0/
-[<RID>/], wherever scripts/Scripts.csproj actually copied it) -- so a plain `dotnet build` is
-reflected under Program Files immediately, without a reinstall. Deliberately runs as a real MCP
+it with a directory junction into the parent of this script's own deployed folder (out/
+<Configuration>/net10.0/[<RID>/], one level up from the scripts/ subfolder
+scripts/Scripts.csproj actually copies this into -- see its own remarks) -- so a plain
+`dotnet build` is reflected under Program Files immediately, without a reinstall. Deliberately
+runs as a real MCP
 tool launched via `desk mcp link-program-files` (see scripts/goodbye.py's own remarks on the
 registry mechanism) rather than a VS Code task, specifically so it inherits Service's own elevated
 process instead of popping a UAC prompt -- the whole reason this project's Service runs elevated in
@@ -64,7 +66,9 @@ def is_reparse_point(path: str) -> bool:
 
 
 def link_program_files() -> str:
-    target = os.path.dirname(os.path.abspath(__file__))
+    # This script itself lives in <OutDir>/scripts/ (see scripts/Scripts.csproj's own remarks) --
+    # the junction target is <OutDir> itself, alongside Service.exe, one level up from here.
+    target = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     if is_reparse_point(LIVE_DIR):
         return f"'{LIVE_DIR}' is already a junction -- nothing to do."
