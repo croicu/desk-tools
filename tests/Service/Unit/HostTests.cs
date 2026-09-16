@@ -187,6 +187,94 @@ public sealed class HostTests
     }
 
     [TestMethod]
+    public void AcceptLoop_McpMissingName_ReturnsInvalidParamsError()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0, mcpRegistryBaseDirectory: EmptyRegistryDir());
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.McpMethod}}", "params": {"processId": 1234} }""");
+            var reply = reader.ReadLine();
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual(-32602, doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpMissingProcessId_ReturnsInvalidParamsError()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0, mcpRegistryBaseDirectory: EmptyRegistryDir());
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.McpMethod}}", "params": {"name": "hello"} }""");
+            var reply = reader.ReadLine();
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual(-32602, doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpUnknownToolName_ReturnsInternalError()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0, mcpRegistryBaseDirectory: EmptyRegistryDir());
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.McpMethod}}", "params": {"name": "no-such-tool", "processId": 1234} }""");
+            var reply = reader.ReadLine();
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual(-32603, doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+            StringAssert.Contains(doc.RootElement.GetProperty("error").GetProperty("message").GetString(), "no-such-tool");
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+    }
+
+    /// <summary>
+    /// A throwaway, guaranteed-empty directory (never the real, build-generated
+    /// mcp-registry/hello.json) -- so these tests never accidentally pick up a real registered tool
+    /// just because one happens to exist at AppContext.BaseDirectory.
+    /// </summary>
+    private static string EmptyRegistryDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"host-mcp-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    [TestMethod]
     public void AcceptLoop_ConnectionWithNoLine_ClosesWithNoReply()
     {
         var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);

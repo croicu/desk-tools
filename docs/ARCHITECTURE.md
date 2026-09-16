@@ -244,30 +244,36 @@ Deliberately a property, not an item, unlike `CopySettingsToOutput`'s own `setti
 `settings.local.json` `Copy` tasks above -- MSBuild properties don't propagate to a referencing
 project's own build the way items can, so `Hello.Tests` referencing `Hello.csproj` doesn't also
 pick up a registry entry the way `CopyToOutputDirectory` items once leaked into every test project
-(see that same section's own history). `src/Service/McpToolLauncher.cs` is the first, still-partial
-consumer (see below) -- `Host`/`Service` actually proxying a client connection's own MCP JSON-RPC
-traffic through to a registered tool (rather than Claude Code launching one directly via `.mcp.json`,
-as today) remains a deliberately separate, larger, not-yet-started piece, since MCP's stdio transport
-requires whatever process launches a server to also hold its stdin/stdout pipes -- Service becoming
-that launcher would mean `.mcp.json` pointing at Service instead of `Hello.dll` directly, with
-Service proxying stdio JSON-RPC through to the process it manages.
+(see that same section's own history). `src/Service/McpToolLauncher.cs` is the first consumer (see
+below); `Host`'s own `mcp` JSON-RPC method (issue #32) is the real trigger on top of it -- but
+Service actually *proxying* a client connection's own MCP JSON-RPC traffic through to a registered
+tool (rather than handing the caller direct `DuplicateHandle`-based access to it, as issue #32
+does) remains a deliberately separate, not-yet-started alternative, only worth building if the
+`DuplicateHandle` approach ever turns out insufficient (e.g. a future non-Windows host) -- MCP's
+stdio transport requires whatever process launches a server to also hold its stdin/stdout pipes,
+which a proxying Service would satisfy by keeping the pipes itself and relaying bytes, instead of
+handing them off the way `HandleDuplicator` does.
 
 `src/Service/ToolLauncher.cs`/`ToolProcess.cs` (see
-[issue #30](https://github.com/croicu/desk-tools/issues/30)): the process+pipes primitive underneath
-that future proxying work, built as its own first increment. `ToolLauncher.Launch` is a generic
+[issue #30](https://github.com/croicu/desk-tools/issues/30)): the process+pipes primitive
+`McpToolLauncher`/`HandleDuplicator` are built on. `ToolLauncher.Launch` is a generic
 child-process spawn given an already-resolved `command`/`args`/`env`/working directory -- both
 standard input and standard output redirected (`UseShellExecute = false`), no BOM on the write side
 (same `Encoding(encoderShouldEmitUTF8Identifier: false)` reasoning as `Host.WriteEncoding`/
 `Client.WriteEncoding`, since a redirected child's default `StandardInputEncoding` is the OS
 codepage, not UTF-8, and a real `Encoding.UTF8` would prepend a BOM a stdio JSON-RPC reader doesn't
-expect) -- wraps the result in `ToolProcess`, a thin `IDisposable` exposing just
+expect) -- wraps the result in `ToolProcess`, a thin `IDisposable` exposing
 `StandardInput`/`StandardOutput`/`HasExited` (`Dispose` closes stdin first, so a well-behaved tool
 sees EOF and exits its own read loop gracefully, the same shutdown path a real client disconnect
-takes, before waiting briefly and disposing the underlying `Process`). Deliberately has no notion of
-the MCP tool registry itself, kept generic so a future non-registry-sourced process could reuse it.
-Wraps a `Process.Start` `Win32Exception` (the executable can't be found/launched at all) and a plain
-null return alike into `AppError`, matching this repo's usual error-surfacing convention rather than
-letting a raw BCL exception escape.
+takes, before waiting briefly and disposing the underlying `Process`). Also exposes
+`DisownAfterHandoff` (see [issue #32](https://github.com/croicu/desk-tools/issues/32)) -- for use
+once `HandleDuplicator` has already handed both pipe ends off to another process: releases
+Service's own `Process` wrapper without blocking on `WaitForExit`, since the tool is meant to keep
+running for as long as its new owner needs it, unlike `Dispose`'s own graceful-and-prompt shutdown
+expectation. Deliberately has no notion of the MCP tool registry itself, kept generic so a future
+non-registry-sourced process could reuse it. Wraps a `Process.Start` `Win32Exception` (the
+executable can't be found/launched at all) and a plain null return alike into `AppError`, matching
+this repo's usual error-surfacing convention rather than letting a raw BCL exception escape.
 
 `src/Service/McpToolLauncher.cs`: the registry-aware layer on top of `ToolLauncher` -- given a tool's
 registry name, resolves `mcp-registry/<name>.json` from `AppContext.BaseDirectory` (Service's own
@@ -276,14 +282,50 @@ production behavior, the same pattern as `Host`'s own `port` constructor paramet
 `.mcp.json`-shaped fragment (`command`/`args`/`env`), and calls `ToolLauncher.Launch` with the
 registry's own directory as the working directory (matching `args`' paths, which are relative to
 it, not to whichever process happens to be calling this). `AppError` on a missing registry file,
-malformed JSON, or a fragment missing/misshaping any of `command`/`args`/`env`. Still just the
-process+pipes primitive (issue #30's own deliberate scope) -- not yet wired to `Host`'s own
-JSON-RPC dispatch (see [issue #31](https://github.com/croicu/desk-tools/issues/31)), no actual MCP
-JSON-RPC proxying through an external client connection; verified end-to-end by
-`tests/Service/Integration/HelloTests.cs`, which launches the real, build-generated `hello` registry
-entry, sends a real `initialize` request over the redirected stdin, and reads back a real MCP
-response over the redirected stdout -- confirming the pipes carry working stdio traffic, not just
-that a process object exists.
+malformed JSON, or a fragment missing/misshaping any of `command`/`args`/`env`.
+
+`src/Service/Platform/{Windows,Linux,Neutral}/HandleDuplicator.cs` (issue #32): hands a launched
+`ToolProcess`'s stdin/stdout pipe handles directly to another process via Win32 `DuplicateHandle`,
+instead of `Host` staying in the loop as a byte relay for the tool's whole lifetime -- `Duplicate(tool,
+targetProcessId)` opens the target process (`OpenProcess(PROCESS_DUP_HANDLE, ...)`), duplicates both
+handles into it, closes Service's own copy of the write end (the same lesson a throwaway spike hit
+before this was built: the tool's stdin pipe won't see EOF, and so never exits, until every
+write-end handle is closed, not just the target's own eventual copy), and returns both duplicated
+values as `long`s (a Win32 `HANDLE` is a pointer -- 8 bytes on x64 -- so `int` would silently
+truncate). Lives behind the same `Platform/` split `SingletonGuard` already uses, since
+`DuplicateHandle`/`OpenProcess` have no cross-platform equivalent (unlike named `Mutex`) -- the
+Linux/Neutral variants throw a clear `AppError` for now rather than attempt a different mechanism
+(e.g. `SCM_RIGHTS` over a Unix domain socket on Linux).
+
+`Host`'s own `mcp` JSON-RPC method (`Host.HandleMcp`, see docs/PROTOCOL.md's Echo protocol section)
+is what actually ties `McpToolLauncher` and `HandleDuplicator` together for a real caller: validates
+`params` (`name`/`processId`, `-32602` on anything missing/malformed), calls `McpToolLauncher.Launch`,
+then `HandleDuplicator.Duplicate` with the caller-supplied `processId`, and on success calls
+`tool.DisownAfterHandoff()` (ownership transferred, so `Host` must not block waiting for the tool to
+exit) and returns the two duplicated handle values as decimal strings. Any failure at any step --
+before or after the tool was actually launched -- is caught by the same outer catch-all
+`HandleLine` already had for every other method, surfacing as `-32603`; if the launch itself
+succeeded but duplication failed, the orphaned `ToolProcess` (nobody has handles to it) is torn down
+via its normal `Dispose()` rather than leaked. `Host`'s constructor also grew an optional
+`mcpRegistryBaseDirectory` testing seam (same pattern as its existing `port` parameter and
+`McpToolLauncher.Launch`'s own `registryBaseDirectory`), so a test can point `mcp` at a throwaway
+registry fixture instead of the real, build-generated one. Trusts the caller-supplied `processId`
+as-is -- no verification against the real TCP connection's owning process (a known, deliberate
+simplification; the loopback listener is local-machine-only exposure either way).
+
+Verified two ways: `tests/Service/Unit/Platform/Windows/HandleDuplicatorTests.cs` exercises
+`HandleDuplicator` directly (duplicating into the test's own process, since the real
+cross-privilege-boundary behavior -- elevated `Service` into unelevated `Desk` -- was already
+validated manually via a throwaway spike before this was built); and
+`tests/Service/Integration/HelloTests.cs`'s own `Mcp_RealHelloEntry_...` test drives the entire real
+path end-to-end -- a real `Host` handling a real `mcp` JSON-RPC request over its loopback listener,
+launching the real, build-generated `hello` registry entry, and a real `initialize`
+request/response exchanged entirely through the duplicated handles, not `Host`'s own pipes. That
+test is Windows-only, guarded at runtime (checking both the OS and whether the test project itself
+was actually built for win-x64, since `Service.csproj`'s own `Platform/` selection -- not the
+literal host OS -- decides which `HandleDuplicator` variant a plain `dotnet test` links against)
+rather than a compile-time `Platform/` split, since its only other precondition (the real Hello
+build) has nothing to do with the RID either.
 
 ## Data flow
 

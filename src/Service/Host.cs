@@ -38,11 +38,26 @@ internal sealed class Host
     /// </summary>
     internal const string ShutdownMethod = "shutdown";
 
+    /// <summary>
+    /// Params <c>{"name": "&lt;registry name&gt;", "processId": &lt;caller's own PID&gt;}</c>. Launches
+    /// the named <c>mcp-registry/</c> tool (see <see cref="McpToolLauncher"/>) and duplicates its
+    /// stdin/stdout pipe handles directly into the caller's own process (see
+    /// <see cref="HandleDuplicator"/>, issue #32) -- Service steps out of the exchange entirely once
+    /// this returns, rather than relaying bytes for the tool's whole lifetime. Result
+    /// <c>{"stdin": "&lt;decimal handle value&gt;", "stdout": "&lt;decimal handle value&gt;"}</c> -- text,
+    /// not a JSON number, since a Win32 <c>HANDLE</c> is a pointer (8 bytes on x64) and a JSON
+    /// number can't reliably round-trip that precision. Trusts the caller-supplied <c>processId</c>
+    /// as-is -- no verification against the real TCP connection's owning process (a known,
+    /// deliberate simplification; the loopback listener is local-machine-only exposure either way).
+    /// </summary>
+    internal const string McpMethod = "mcp";
+
     private const string Category = "host";
 
     private const int ParseErrorCode = -32700;
     private const int InvalidRequestCode = -32600;
     private const int MethodNotFoundCode = -32601;
+    private const int InvalidParamsCode = -32602;
     private const int InternalErrorCode = -32603;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -65,16 +80,25 @@ internal sealed class Host
     private readonly ManualResetEventSlim _shutdownSignal = new(initialState: false);
     private readonly object _activityLock = new();
 
+    private readonly string? _mcpRegistryBaseDirectory;
+
     private DateTimeOffset _lastActivity;
     private int _inFlightCount;
     private Timer? _idleTimer;
     private volatile bool _accepting;
     private Thread? _acceptThread;
 
-    public Host(ISettingsProvider settings, int? port = null)
+    /// <summary>
+    /// <paramref name="mcpRegistryBaseDirectory"/> is a testing seam for <see cref="McpMethod"/>
+    /// (defaults to <see cref="McpToolLauncher.Launch"/>'s own <see cref="AppContext.BaseDirectory"/>
+    /// default, Service's real behavior) -- same pattern as <paramref name="port"/>, lets a test
+    /// point this at a throwaway registry fixture instead of the real, build-generated one.
+    /// </summary>
+    public Host(ISettingsProvider settings, int? port = null, string? mcpRegistryBaseDirectory = null)
     {
         _settings = settings;
         _listener = new TcpListener(IPAddress.Loopback, port ?? settings.Port);
+        _mcpRegistryBaseDirectory = mcpRegistryBaseDirectory;
         _lastActivity = DateTimeOffset.UtcNow;
     }
 
@@ -197,7 +221,7 @@ internal sealed class Host
     /// written, so the client always gets a normal result for the shutdown request itself before the
     /// listener actually stops.
     /// </summary>
-    private static bool HandleLine(string line, StreamWriter writer)
+    private bool HandleLine(string line, StreamWriter writer)
     {
         JsonDocument doc;
         try
@@ -233,6 +257,7 @@ internal sealed class Host
             }
 
             var method = methodElement.GetString() ?? string.Empty;
+            var paramsElement = root.TryGetProperty("params", out var p) ? p : default;
 
             try
             {
@@ -244,6 +269,9 @@ internal sealed class Host
                     case ShutdownMethod:
                         WriteResult(writer, idElement, "ok");
                         return true;
+                    case McpMethod:
+                        HandleMcp(idElement, paramsElement, writer);
+                        return false;
                     default:
                         WriteError(writer, idElement, MethodNotFoundCode, $"Method not found: {method}");
                         return false;
@@ -257,6 +285,57 @@ internal sealed class Host
                 WriteError(writer, idElement, InternalErrorCode, $"Internal error: {error.Message}");
                 return false;
             }
+        }
+    }
+
+    /// <summary>
+    /// See <see cref="McpMethod"/>'s own remarks for the full contract. Validates <c>params</c>
+    /// itself (missing/malformed <c>name</c>/<c>processId</c> is <see cref="InvalidParamsCode"/>,
+    /// not <see cref="InternalErrorCode"/>) before doing anything with side effects; any failure from
+    /// <see cref="McpToolLauncher.Launch"/> or <see cref="HandleDuplicator.Duplicate"/> (an
+    /// <see cref="AppError"/>) surfaces as <see cref="InternalErrorCode"/>, same as any other
+    /// unexpected runtime failure -- this repo doesn't currently distinguish "known domain failure"
+    /// from "truly unexpected" in its JSON-RPC error codes (see <c>src/Hello/Program.cs</c>'s own
+    /// single catch-all), just message content.
+    /// </summary>
+    private void HandleMcp(JsonElement id, JsonElement paramsElement, StreamWriter writer)
+    {
+        if (paramsElement.ValueKind != JsonValueKind.Object ||
+            !paramsElement.TryGetProperty("name", out var nameElement) ||
+            nameElement.ValueKind != JsonValueKind.String)
+        {
+            WriteError(writer, id, InvalidParamsCode, "Invalid params: 'name' (string) is required.");
+            return;
+        }
+
+        if (!paramsElement.TryGetProperty("processId", out var processIdElement) ||
+            processIdElement.ValueKind != JsonValueKind.Number ||
+            !processIdElement.TryGetInt32(out var processId))
+        {
+            WriteError(writer, id, InvalidParamsCode, "Invalid params: 'processId' (integer) is required.");
+            return;
+        }
+
+        var name = nameElement.GetString() ?? string.Empty;
+
+        ToolProcess? tool = null;
+        try
+        {
+            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory);
+            var (stdin, stdout) = HandleDuplicator.Duplicate(tool, processId);
+            tool.DisownAfterHandoff();
+            tool = null; // Ownership (and both pipe ends) already transferred -- don't tear it down below.
+
+            Logger.Info($"host: launched mcp tool '{name}' and duplicated its stdio into process {processId}.", Category);
+            WriteResult(writer, id, new McpResult(stdin.ToString(), stdout.ToString()));
+        }
+        finally
+        {
+            // Only reached if something failed after a successful Launch but before the handoff
+            // completed (e.g. HandleDuplicator itself threw) -- the launched process is orphaned
+            // (nobody has handles to it), so tear it down the normal graceful way rather than
+            // leaking it.
+            tool?.Dispose();
         }
     }
 
@@ -304,4 +383,6 @@ internal sealed class Host
     private sealed record ErrorEnvelope(string Jsonrpc, JsonElement? Id, ErrorDetail Error);
 
     private sealed record ErrorDetail(int Code, string Message);
+
+    private sealed record McpResult(string Stdin, string Stdout);
 }

@@ -73,17 +73,32 @@ notification per the JSON-RPC spec: consumed, no response ever sent, regardless 
 that sends nothing before closing its own end likewise gets no reply, just a closed connection.
 Same error codes/envelope shapes as `src/Hello`'s own hand-rolled dispatch (see the MCP section
 above): malformed JSON is `-32700` (Parse error, `id: null`); a request missing `method` is
-`-32600` (Invalid Request); an unrecognized method is `-32601` (Method not found); an unexpected
-exception while handling a request is `-32603` (Internal error).
+`-32600` (Invalid Request); an unrecognized method is `-32601` (Method not found); missing/malformed
+`params` on a method that needs them is `-32602` (Invalid params); an unexpected exception while
+handling a request is `-32603` (Internal error).
 
-Two methods today, both no-params:
+Three methods today:
 
-- `ping` -- result `"pong"`. A liveness/reachability check.
-- `shutdown` -- result `"ok"`. Asks `Host` to shut down gracefully once it has replied
+- `ping` -- no params, result `"pong"`. A liveness/reachability check.
+- `shutdown` -- no params, result `"ok"`. Asks `Host` to shut down gracefully once it has replied
   ([issue #22](https://github.com/croicu/desk-tools/issues/22)) -- still replies first, so the
   client gets a definitive acknowledgment before the listener actually stops. Shares `Host`'s
   existing idle-timeout shutdown path rather than a separate mechanism, so the teardown itself
   (stop listening, join the accept thread) is identical either way.
+- `mcp` -- params `{"name": "<mcp-registry name>", "processId": <caller's own PID>}`. Launches the
+  named tool (see the MCP tool registry entry below, and `docs/ARCHITECTURE.md`'s `McpToolLauncher`
+  entry) and hands the caller direct access to its stdin/stdout by duplicating the underlying pipe
+  handles directly into the caller's own process via Win32 `DuplicateHandle`
+  ([issue #32](https://github.com/croicu/desk-tools/issues/32)) -- `Host` steps out of the exchange
+  entirely once it replies, rather than relaying the tool's traffic itself for its whole lifetime.
+  Result `{"stdin": "<decimal handle value>", "stdout": "<decimal handle value>"}` -- text, not a
+  JSON number, since a Win32 `HANDLE` is a pointer (8 bytes on x64) and a JSON number can't reliably
+  round-trip that precision. Windows-only (the mechanism itself is); `-32603` (Internal error) on
+  any other platform, on a missing/malformed registry entry, or on the duplication itself failing.
+  Trusts the caller-supplied `processId` as-is -- no verification against the real TCP connection's
+  owning process (a known, deliberate simplification; the loopback listener is local-machine-only
+  exposure either way). No `src/Desk`/`.mcp.json` consumer yet -- verified directly today (a test
+  that opens the duplicated handles itself and exchanges real MCP traffic with the launched tool).
 
 `src/Desk` is this protocol's main client, with two subcommands (see the CLI section above):
 
@@ -187,6 +202,8 @@ own entry to the same folder by convention, without needing any of this MSBuild 
 `src/Service/McpToolLauncher.cs` (see [issue #30](https://github.com/croicu/desk-tools/issues/30)
 and `docs/ARCHITECTURE.md`'s own entry) is the first consumer: given a registry name, it reads and
 parses that tool's fragment and spawns it as a child process with redirected stdin/stdout via
-`src/Service/ToolLauncher.cs`. Still just that process+pipes primitive -- not yet wired to any
-external trigger (no echo/wire-protocol command, no `.mcp.json` changes, no actual MCP JSON-RPC
-proxying through a client connection).
+`src/Service/ToolLauncher.cs`. `Host`'s own `mcp` JSON-RPC method (see the Echo protocol section
+above and [issue #32](https://github.com/croicu/desk-tools/issues/32)) is the actual external
+trigger: it calls `McpToolLauncher.Launch`, then hands the caller direct access to the launched
+tool's stdio via `DuplicateHandle` -- still no `.mcp.json` changes and no `src/Desk` consumer of
+this yet, that remains a separate future step.
