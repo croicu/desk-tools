@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Minimal, hand-rolled MCP server over stdio exposing a single unlink_program_files tool.
 
-The counterpart to link-program-files.py: removes the dev junction at
-"C:\\Program Files\\Desk Tools" and restores the real, MSI-installed folder from
-"Desk Tools.bak", putting the machine back the way a real install left it. See
-link-program-files.py's own remarks for why this runs as a real MCP tool (via
-`desk mcp unlink-program-files`) instead of a UAC-prompting VS Code task -- it inherits Service's
-own elevated process instead. Mirrors goodbye.py's own shape (no SDK, newline-delimited JSON-RPC
-2.0 over stdio, protocol version "2025-06-18" only, same error codes); entirely self-contained.
+The counterpart to link-program-files.py: removes the ".dev" junction inside
+"C:\\Program Files\\Desk Tools" (see that script's own remarks for the full mechanism --
+src/Base/DevRedirect.cs is what actually consumes it). Never touches "Desk Tools" itself, so
+there's no "restore the real install" step needed here at all, unlike this tool's earlier,
+abandoned rename-the-whole-folder design. See link-program-files.py's own remarks for why this
+runs as a real MCP tool (via `desk mcp unlink-program-files`) instead of a UAC-prompting VS Code
+task -- it inherits Service's own elevated process instead. Mirrors goodbye.py's own shape (no
+SDK, newline-delimited JSON-RPC 2.0 over stdio, protocol version "2025-06-18" only, same error
+codes); entirely self-contained.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ INTERNAL_ERROR_CODE = -32603
 UNLINK_PROGRAM_FILES_INPUT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 
 LIVE_DIR = r"C:\Program Files\Desk Tools"
-BACKUP_DIR = r"C:\Program Files\Desk Tools.bak"
+DEV_DIR = os.path.join(LIVE_DIR, ".dev")
 
 
 def write_result(id_: Any, result: Any) -> None:
@@ -59,18 +61,23 @@ def is_reparse_point(path: str) -> bool:
 
 
 def unlink_program_files() -> str:
-    if not is_reparse_point(LIVE_DIR):
-        raise RuntimeError(f"'{LIVE_DIR}' is not currently a junction -- nothing to unlink.")
+    if not is_reparse_point(DEV_DIR):
+        raise RuntimeError(f"'{DEV_DIR}' is not currently a junction -- nothing to unlink.")
 
-    if not os.path.isdir(BACKUP_DIR):
-        raise RuntimeError(f"No backup found at '{BACKUP_DIR}' -- cannot restore.")
+    # If Service is currently running as the dev-redirected copy (see src/Base/DevRedirect.cs),
+    # this very tool was launched from inside DEV_DIR itself (src/Service/ToolLauncher.cs sets
+    # every launched tool's own cwd to the registry's own directory, which for a dev-redirected
+    # Service is DEV_DIR) -- Windows implicitly locks a process's own cwd, so removing DEV_DIR out
+    # from under ourselves would fail with WinError 32 ("used by another process") unless we step
+    # out of it first. See this repo's own git history for link-program-files.py's earlier,
+    # independently-confirmed run-in with exactly this class of bug.
+    os.chdir(LIVE_DIR)
 
     # rmdir on a junction/reparse-point directory removes just the reparse point itself, not the
     # real build output it points at -- never shutil.rmtree here, that would recurse into the
     # target and delete the actual out/ folder.
-    os.rmdir(LIVE_DIR)
-    os.rename(BACKUP_DIR, LIVE_DIR)
-    return f"Unlinked '{LIVE_DIR}' and restored the original install from '{BACKUP_DIR}'."
+    os.rmdir(DEV_DIR)
+    return f"Unlinked '{DEV_DIR}'. Service.exe/Desk.exe under '{LIVE_DIR}' will run normally again on their next start."
 
 
 def handle_initialize(id_: Any) -> None:
@@ -91,10 +98,7 @@ def handle_tools_list(id_: Any) -> None:
             "tools": [
                 {
                     "name": UNLINK_PROGRAM_FILES_TOOL_NAME,
-                    "description": (
-                        "Removes the C:\\Program Files\\Desk Tools junction and restores the real "
-                        "install from Desk Tools.bak."
-                    ),
+                    "description": "Removes the .dev junction inside C:\\Program Files\\Desk Tools.",
                     "inputSchema": UNLINK_PROGRAM_FILES_INPUT_SCHEMA,
                 }
             ]

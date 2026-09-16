@@ -6,7 +6,9 @@ public sealed record CliArguments(bool Debug = false, string? LogDir = null);
 
 public static class Program
 {
-    public static int Main(string[] args) => Start(args);
+    // See DevRedirect's own remarks -- must run before anything else Main does. No-op (returns
+    // null) unless a ".dev" junction actually exists alongside this exe's own install folder.
+    public static int Main(string[] args) => DevRedirect.TryHandoff("Service.exe", args) ?? Start(args);
 
     /// <summary>
     /// Testable entry point -- Main() just forwards here. settingsPath lets a test point at a
