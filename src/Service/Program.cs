@@ -32,6 +32,21 @@ public static class Program
     {
         Logger.Info("desk-tools: started.");
 
+        // Left at its own install folder (the scheduled task registers no explicit "start in"
+        // directory -- see installer/Package.wxs's CreateScheduledTask -- so Windows defaults it to
+        // Service.exe's own containing folder), Service's own current directory would hold an
+        // implicit Windows lock on that folder for its entire lifetime -- the same class of
+        // "process cannot access the file" lock that scripts/link-program-files.py's own remarks
+        // describe for a launched tool's cwd, just persistent instead of transient. Only
+        // link-program-files.py/unlink-program-files.py's job of renaming that very folder actually
+        // needs this today, but the fix belongs here rather than duplicated per-script: it's Service
+        // itself, not any one tool, that's sitting in the folder for as long as it runs. Set after
+        // Settings/Logger are already wired up (Context.Start's job, above this method), not before
+        // -- Settings.Load's own working-directory settings.json tier is deliberately
+        // cwd-relative (see src/Base/Settings.cs's DefaultSettingsPath), so moving cwd any earlier
+        // would silently break that tier.
+        Environment.CurrentDirectory = Environment.SystemDirectory;
+
         using var guard = SingletonGuard.TryAcquire(out var abandoned);
         if (guard is null)
         {
