@@ -68,11 +68,22 @@
        BaseOutputPath): each references Base.csproj, so each publish independently produces its own
        copy of Base.dll/Base.pdb into that shared folder, and since all three are built from the
        exact same Configuration, each later publish's copy just harmlessly overwrites the earlier,
-       identical one. -->
+       identical one.
+
+       Same reasoning applies to scripts/Scripts.csproj (see its own remarks): without this,
+       goodbye.py/link-program-files.py/unlink-program-files.py and their mcp-registry/*.json
+       entries would never reach $(AppPublishDir) at all, so a real MSI install would be missing
+       the Python tools entirely despite `dotnet build` locally having them all along. No -r flag
+       and no self-contained flag here, unlike the three above: Scripts.csproj is a
+       Microsoft.Build.NoTargets project (no compiled output, just Copy/WriteLinesToFile targets
+       keyed off $(PublishDir)), so those flags would be inert; confirmed `dotnet publish
+       scripts/Scripts.csproj -o <dir>` alone already produces both the .py files and
+       mcp-registry/*.json correctly. -->
   <Target Name="PublishAppForSetup" BeforeTargets="CoreCompile">
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Service\Service.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Hello\Hello.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Desk\Desk.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\scripts\Scripts.csproj&quot; -c $(Configuration) -o &quot;$(AppPublishDir)&quot;" />
   </Target>
 
 </Project>
