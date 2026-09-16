@@ -12,6 +12,14 @@ on:
         default: "manual-test"
 
 jobs:
+  # win-x64 is src/Directory.Build.props' own default RuntimeIdentifier now (see its own remarks),
+  # so this job -- running on ubuntu-latest -- needs an explicit override to linux-x64. Unlike
+  # CI's own Linux job, this publishes a single project (src/Service), not the whole solution, so
+  # -r works directly here rather than needing the DESK_TOOLS_RID environment-variable workaround
+  # (the .NET SDK only rejects a command-line RID at the *solution* level). An explicit RID means
+  # the publish output now lands in a RID-specific subfolder (out/Release/net10.0/linux-x64/publish/,
+  # confirmed by actually running this locally) rather than the old out/Release/net10.0/publish/ --
+  # the Archive step below was updated to match.
   release-linux:
     runs-on: ubuntu-latest
     permissions:
@@ -27,12 +35,12 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Publish
-        run: dotnet publish src/Service -c Release
+        run: dotnet publish src/Service -c Release -r linux-x64 --self-contained false
 
       - name: Archive
         run: |
-          cd out/Release/net10.0/publish
-          zip -r ../../../../desk-tools.zip .
+          cd out/Release/net10.0/linux-x64/publish
+          zip -r ../../../../../desk-tools.zip .
 
       - id: tag
         run: echo "value=${{ github.event.inputs.tag_name || github.ref_name }}" >> "$GITHUB_OUTPUT"

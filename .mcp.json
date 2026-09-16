@@ -2,9 +2,10 @@
   "mcpServers": {
     "hello": {
       "type": "stdio",
-      "command": "dotnet",
+      "command": "C:\\Program Files\\Desk Tools\\Desk.exe",
       "args": [
-        "out/Debug/net10.0/Hello.dll"
+        "mcp",
+        "hello"
       ],
       "env": {}
     },

@@ -179,7 +179,11 @@ After any change that affects the public interface, CLI, or file formats, update
 ## Commands
 
 ```bash
-# Build
+# Build -- win-x64 by default (src/Directory.Build.props'/tests/Directory.Build.props' own
+# RuntimeIdentifier default, see their own remarks): this project's mission ("execute MCP code at
+# a high privilege mode") only really exists on Windows today, so a plain build/test already
+# exercises the real Platform/Windows/ implementations (SingletonGuard, HandleDuplicator), not
+# always-succeeding/always-throwing stand-ins. Output lands in out/<Configuration>/net10.0/win-x64/.
 dotnet build
 
 # Run
@@ -195,16 +199,23 @@ dotnet test --filter "FullyQualifiedName=Croicu.Desk.Tools.Service.Tests.Unit.Pr
 # Integration tests (tests/Desk/Integration/, [TestCategory("Integration")]) are excluded from the
 # default `dotnet test` above -- see Architecture convention 4. They're not self-contained: they
 # expect a real Service instance already running (e.g. `dotnet Service.dll` from
-# out/Debug/net10.0, or the scheduled task) on its real settings-resolved port, rather than
+# out/Debug/net10.0/win-x64, or the scheduled task) on its real settings-resolved port, rather than
 # spinning one up themselves. Run them explicitly, with Service already started:
 dotnet test --filter TestCategory=Integration
 
-# tests/Service's own real per-platform tests (tests/Service/Unit/Platform/, e.g.
-# SingletonGuardTests.cs's real Mutex contention/abandonment behavior) only compile in under an
-# explicit RID, mirroring src/Service/Service.csproj's own Platform/-selection -- the default
-# `dotnet test` above compiles the Neutral (no-op) variant instead. Run explicitly for the real
-# Windows behavior:
-dotnet test tests/Service/Service.Tests.csproj -r win-x64
+# Building/testing for a different platform: override with the DESK_TOOLS_RID environment
+# variable, not a command-line -r/`/p:RuntimeIdentifier=` flag -- the .NET SDK rejects either of
+# those outright once a solution (not a single project) is involved ("NETSDK1134: Building a
+# solution with a specific RuntimeIdentifier is not supported"), even though this exact same
+# property, set as a plain default in Directory.Build.props, builds a whole solution just fine. An
+# environment variable sidesteps that restriction entirely (see src/Directory.Build.props' own
+# remarks, and .github/workflows/ci.yaml's own Linux job, which does exactly this). Clear it (empty
+# string) to fall through to the Platform/Neutral/ stand-ins instead of a real platform's behavior.
+DESK_TOOLS_RID=linux-x64 dotnet test --filter TestCategory!=Integration
+
+# A single project *can* still take -r/`/p:RuntimeIdentifier=` directly on the command line, since
+# that restriction is solution-level only:
+dotnet build src/Service/Service.csproj -r linux-x64 --self-contained false
 
 # Build the Windows MSI installer (Windows-only, WiX cannot build on non-Windows hosts at all --
 # see installer/Setup.wixproj). Not part of the `dotnet build`/`test` commands above;

@@ -17,10 +17,18 @@ CLI signature and file format schemas for `desk-tools`.
 `--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
 `--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
 `--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
-it). `src/Desk` additionally requires exactly one bare subcommand, `ping` or `shutdown` (a verb --
-what Desk should do -- rather than a `--`-prefixed flag, since the two are mutually exclusive, not
-independent options); missing it, giving both, or any other unrecognized argument exits 2, same as
-`src/Service`. See the Echo protocol section below for what each subcommand sends.
+it). `src/Desk` additionally requires exactly one bare subcommand, `ping`, `shutdown`, or
+`mcp <name>` (a verb -- what Desk should do -- rather than a `--`-prefixed flag, since they're
+mutually exclusive, not independent options); missing one, giving more than one, `mcp` with no name
+argument, or any other unrecognized argument exits 2, same as `src/Service`. See the Echo protocol
+section below for what each subcommand sends.
+
+`desk mcp <name>` is itself a stdio MCP proxy (see
+[issue #33](https://github.com/croicu/desk-tools/issues/33)): usable as a real `.mcp.json`
+`command` entry pointing at Desk instead of a tool's own executable directly. Once launched, its
+own stdout carries only the launched tool's traffic (Desk installs a silent logging sink before
+this starts, the same discipline `src/Hello`'s own `Program.Start` documents for itself) -- see the
+Echo protocol section below for the full exchange.
 
 ## MCP (`src/Hello`)
 
@@ -97,10 +105,9 @@ Three methods today:
   any other platform, on a missing/malformed registry entry, or on the duplication itself failing.
   Trusts the caller-supplied `processId` as-is -- no verification against the real TCP connection's
   owning process (a known, deliberate simplification; the loopback listener is local-machine-only
-  exposure either way). No `src/Desk`/`.mcp.json` consumer yet -- verified directly today (a test
-  that opens the duplicated handles itself and exchanges real MCP traffic with the launched tool).
+  exposure either way).
 
-`src/Desk` is this protocol's main client, with two subcommands (see the CLI section above):
+`src/Desk` is this protocol's main client, with three subcommands (see the CLI section above):
 
 - `desk ping` -- sends a `ping` request, prints the result (`pong`), and exits. If `Host` isn't
   reachable, auto-starts it via the installed scheduled task (`schtasks /run /tn "Desk Tools
@@ -113,6 +120,13 @@ Three methods today:
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
   running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
   prints a fixed confirmation rather than the raw JSON-RPC result.
+- `desk mcp <name>` -- sends an `mcp` request (same auto-start-on-failure retry as `ping`), opens
+  the two duplicated handles the result returns, then bridges this process's own stdin/stdout to
+  them (`src/Desk/McpProxy.cs`, see `docs/ARCHITECTURE.md`'s own entry) until its own stdin reaches
+  EOF -- at which point it closes its copy of the tool's stdin (so the tool sees EOF too and exits
+  its own read loop gracefully) and exits itself. Makes `desk mcp <name>` usable as a real
+  `.mcp.json` `command` entry pointing at Desk instead of the tool's own executable directly --
+  Desk never parses the relayed traffic, purely a line relay.
 
 `scripts/shutdown_service.py` is a second, standalone client -- plain-stdlib Python (`socket`/
 `json`/`argparse`, no dependencies), for shutting `Host` down without the .NET toolchain involved.

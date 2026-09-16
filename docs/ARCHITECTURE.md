@@ -125,16 +125,17 @@ interactively-logged-on user's own session) without needing `SeCreateGlobalPrivi
 guaranteed for every account this might run under. A crashed previous holder's abandoned mutex still
 hands over ownership there (`AbandonedMutexException`, caught and logged as a warning, not treated
 as a failure) -- no separate crash-detection scheme needed, a named `Mutex` gives that for free.
-Unlike `ServiceConsole`, which has no unit tests at all (verified live instead, since the default
-Neutral test build never exercises its real per-platform behavior), `SingletonGuard` gets its own
-matching test-side split: `tests/Service/Service.Tests.csproj` mirrors `Service.csproj`'s exact
-Platform/-selection ItemGroups (see that project file's own comment), so
-`tests/Service/Unit/Platform/Windows/SingletonGuardTests.cs` (real contention/abandonment behavior,
-only meaningful -- and only compiled at all -- under `dotnet test -r win-x64`) pairs with whichever
-`SingletonGuard` variant the `Service.csproj` `ProjectReference` itself actually compiled for that
-same RID, while `tests/Service/Unit/Platform/{Neutral,Linux}/SingletonGuardTests.cs` test the no-op
-variants' own documented contract under the default (no-RID) `dotnet test` and `-r linux-x64`
-respectively. See CLAUDE.md's Commands section for the exact `-r win-x64` invocation.
+Unlike `ServiceConsole`, which has no unit tests at all (verified live instead), `SingletonGuard`
+gets its own matching test-side split: `tests/Service/Service.Tests.csproj` mirrors
+`Service.csproj`'s exact Platform/-selection ItemGroups (see that project file's own comment), so
+`tests/Service/Unit/Platform/Windows/SingletonGuardTests.cs` (real contention/abandonment behavior)
+pairs with whichever `SingletonGuard` variant the `Service.csproj` `ProjectReference` itself
+actually compiled for that same RID -- win-x64 is `tests/Directory.Build.props`'/
+`src/Directory.Build.props`' own default now (see their own remarks), so a plain `dotnet test`
+already exercises this real variant, not the no-op stand-in. Reaching
+`tests/Service/Unit/Platform/{Neutral,Linux}/SingletonGuardTests.cs` instead (which test the no-op
+variants' own documented contract) needs an explicit override -- see CLAUDE.md's Commands section
+for the `DESK_TOOLS_RID` environment variable this now takes.
 
 `installer/Package.wxs` registers `Service.exe` as a Windows scheduled task (`"Desk Tools
 Service"`), not a formal Windows Service (SCM) -- deferred custom actions shelling out to
@@ -174,27 +175,55 @@ CLI flag of its own, `--log <dir>`
 loopback listener on `ISettingsProvider.Port` (the same shared settings.json `Host` itself reads,
 so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one JSON-RPC
 request line, waits for the response, and exits. Requires exactly one bare subcommand
-(`DeskCommand`, a verb -- not a `--`-prefixed flag, since the two are mutually exclusive): `ping`
+(`DeskCommand`, a verb -- not a `--`-prefixed flag, since they're mutually exclusive): `ping`
 sends a `ping` request and prints its result (`"pong"`) via `Logger.Print`; `shutdown` sends a
 `Host.ShutdownMethod` request (kept in sync by hand as its own literal, since Desk deliberately has
 no `ProjectReference` on `Service.csproj` to reference the real constant) and prints a fixed
-confirmation instead of the raw JSON-RPC result. `Start` forwards the parsed command into
-`Run` via a trivial forwarding lambda (`() => Run(arguments.Command)`, same pattern Hello's own
-`Start` already uses for its `input` parameter), since `Context.Start`'s `run` delegate is a plain
-`Func<int>`. The actual connect/send/read exchange lives in `Client` (`src/Desk/Client.cs`),
-constructed with an optional port override (same pattern as `Host`'s own constructor) so a test can
-point it at a test-local peer instead of the real settings-resolved port -- `Client` itself has no
-notion of "ping" vs "shutdown", it only ever sends a method name with no params and returns the
-result; the method's meaning is entirely `Host`'s to interpret. A closed connection, a JSON-RPC
-error response, or a failure to connect all raise a plain `AppError`, surfaced through the same
+confirmation instead of the raw JSON-RPC result; `mcp <name>` (see
+[issue #33](https://github.com/croicu/desk-tools/issues/33)) launches the named tool and bridges
+this process's own stdio to it -- see `McpProxy` below. `Start` forwards the parsed
+`CliArguments` into `Run` via a trivial forwarding lambda (`() => Run(arguments)`, same pattern
+Hello's own `Start` already uses for its `input` parameter), since `Context.Start`'s `run` delegate
+is a plain `Func<int>`. For `mcp`, `Start` also installs a silent `DiagnosticsLog` sink *before*
+`Context.Start` can install a real, printing one -- once `McpProxy.Run` starts relaying the
+launched tool's own stdout, this process's stdout must carry only that traffic, the same reasoning
+`src/Hello/Program.cs`'s own `Start` already documents for itself (no `ProjectReference` to
+cross-link a real `<see cref>` to it). The actual connect/send/read exchange lives in `Client`
+(`src/Desk/Client.cs`), constructed with an optional port override (same pattern as `Host`'s own
+constructor) so a test can point it at a test-local peer instead of the real settings-resolved
+port -- `Client.Send` has no notion of "ping" vs "shutdown", it only ever sends a method name with
+no params and returns the string result; a separate `Client.LaunchMcpTool` method exists
+specifically for `mcp`'s own richer contract (params, and a structured `{"stdin", "stdout"}`
+result) rather than generalizing `Send` prematurely. A closed connection, a JSON-RPC error
+response, or a failure to connect all raise a plain `AppError`, surfaced through the same
 `AppError`-to-exit-code-1
 handling every other app here already gets from `Context.Start`. `shutdown` stays fail-fast there,
 no retry, no auto-start (shutting down something that isn't running isn't worth auto-starting for);
-`ping` instead falls back to `ServiceLauncher.StartAndWaitUntilReachable`
-(`src/Desk/ServiceLauncher.cs`) on that first failure, then retries once (see
-[issue #27](https://github.com/croicu/desk-tools/issues/27)). No `IConsole` concerns of its own (an
+`ping` and `mcp` instead fall back to `ServiceLauncher.StartAndWaitUntilReachable`
+(`src/Desk/ServiceLauncher.cs`) on that first failure, then retry once (see
+[issue #27](https://github.com/croicu/desk-tools/issues/27)) -- `mcp`'s own retry also fires on a
+non-reachability `AppError` (e.g. an unregistered tool name), a known, minor imprecision inherited
+from `ping`'s own existing pattern rather than a new one. No `IConsole` concerns of its own (an
 ordinary console app, already console-attached), hence its own `VoidConsole`, same reasoning as
 Hello's but for the opposite reason (Hello is headless; Desk is already attached).
+
+`src/Desk/McpProxy.cs` (issue #33): bridges this process's own stdin/stdout to a tool Service
+already launched and handed direct pipe access to via `mcp`'s `DuplicateHandle`-based handoff (see
+`Host`'s own `mcp` entry above) -- what makes `desk mcp <name>` usable as a real `.mcp.json`
+`command` entry pointing at Desk instead of the tool's own executable directly. Opens the two
+duplicated handle values as a `SafeFileHandle`/`FileStream` pair each (same construction the
+original throwaway spike and `tests/Service/Integration/HelloTests.cs`'s own `mcp` test already
+use), then pumps lines in both directions: one background thread reads the tool's stdout and
+writes each line via `Logger.Print` (not raw `Console.Write*`, per CLAUDE.md's "Console.* is
+confined to src/Base/Sinks" rule -- `Program.Start`'s silent sink means nothing else ever reaches
+real stdout while this runs), while the main thread reads this process's own stdin (injectable for
+tests, matching Hello's own `Run(TextReader? input)` seam) and writes each line to the tool's
+duplicated stdin. Blocks until its own stdin reaches EOF (the parent MCP client disconnected), then
+closes its own copy of the tool's stdin -- the same graceful-EOF shutdown path a real client
+disconnect already takes elsewhere in this repo -- and gives the output pump a bounded 5s chance to
+finish draining before returning. Desk itself never parses the relayed traffic, purely a line
+relay -- same "no SDK, hand-roll the transport" approach the rest of this repo's MCP surface
+already takes.
 
 `src/Desk/ServiceLauncher.cs`: runs the installed scheduled task (`schtasks /run /tn "Desk Tools
 Service"`) rather than launching `Service.dll` as a plain child process -- `Host` is meant to run at
@@ -321,11 +350,12 @@ validated manually via a throwaway spike before this was built); and
 path end-to-end -- a real `Host` handling a real `mcp` JSON-RPC request over its loopback listener,
 launching the real, build-generated `hello` registry entry, and a real `initialize`
 request/response exchanged entirely through the duplicated handles, not `Host`'s own pipes. That
-test is Windows-only, guarded at runtime (checking both the OS and whether the test project itself
-was actually built for win-x64, since `Service.csproj`'s own `Platform/` selection -- not the
-literal host OS -- decides which `HandleDuplicator` variant a plain `dotnet test` links against)
-rather than a compile-time `Platform/` split, since its only other precondition (the real Hello
-build) has nothing to do with the RID either.
+test is Windows-only, guarded at runtime (checking whether the resolved output directory's own name
+is "win-x64" -- `Service.csproj`'s own `Platform/` selection, not the literal host OS, decides which
+`HandleDuplicator` variant gets linked in) rather than a compile-time `Platform/` split, since its
+only other precondition (the real Hello build) has nothing to do with the RID either. Passes on a
+plain `dotnet test` now, since win-x64 is `tests/Directory.Build.props`' own default -- the guard
+only actually fires if someone deliberately overrides to a different RID.
 
 ## Data flow
 

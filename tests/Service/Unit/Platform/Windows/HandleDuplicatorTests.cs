@@ -5,8 +5,9 @@ namespace Croicu.Desk.Tools.Service.Tests.Unit;
 
 /// <summary>
 /// Only compiled in when the test project itself is built for win-x64 (see
-/// tests/Service/Service.Tests.csproj's Platform/-selection ItemGroups) -- run explicitly with
-/// `dotnet test -r win-x64` to exercise these; the default `dotnet test` (no RID) instead compiles
+/// tests/Service/Service.Tests.csproj's Platform/-selection ItemGroups) -- win-x64 is
+/// tests/Directory.Build.props' own default RuntimeIdentifier now, so a plain `dotnet test` already
+/// exercises these; an explicit `DESK_TOOLS_RID` override to something else instead compiles
 /// Platform/Neutral/HandleDuplicatorTests.cs, which tests the "not supported" variant's contract
 /// instead. Duplicates into this test process's own PID rather than a genuinely separate one --
 /// enough to prove the mechanism/code path works; the real cross-privilege-boundary behavior

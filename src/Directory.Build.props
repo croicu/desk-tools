@@ -8,4 +8,32 @@
     <BaseOutputPath>$(MSBuildThisFileDirectory)..\out\</BaseOutputPath>
   </PropertyGroup>
 
+  <!-- win-x64 by default (see tests/Directory.Build.props for the same default applied to
+       tests/): this project's actual mission ("execute MCP code at a high privilege mode", per
+       CLAUDE.md) only really exists on Windows today, since src/Service/Platform/Windows/ has the
+       real SingletonGuard/HandleDuplicator implementations. Without an explicit RuntimeIdentifier, a
+       plain `dotnet build`/`dotnet test` silently picked the always-succeeding/always-throwing
+       Platform/Neutral/ stand-ins instead, which is surprising for what's supposed to be "the
+       normal build" (confirmed the hard way: a real dev-convenience Program Files junction pointing
+       at a no-RID build meant `desk mcp <name>` always failed with "not supported on this
+       platform", even though a win-x64 build sitting right next to it worked fine).
+
+       Overridable via the DESK_TOOLS_RID environment variable (e.g.
+       DESK_TOOLS_RID=linux-x64 dotnet build), not a command-line -r/`/p:RuntimeIdentifier=` flag,
+       confirmed the hard way that the .NET SDK rejects either of those outright once a solution
+       (not a single project) is involved ("NETSDK1134: Building a solution with a specific
+       RuntimeIdentifier is not supported"), even though this exact same property, set here as a
+       plain default, builds a whole solution just fine. An environment variable sidesteps that
+       restriction entirely: as far as the SDK's own solution-level check is concerned, no RID was
+       passed on the command line at all, it just happens to evaluate differently. See
+       .github/workflows/ci.yaml's own Linux job, which sets exactly this env var, and CLAUDE.md's
+       Commands section. src/Base is included in this default too, not scoped out; Architecture
+       convention 11 still requires it to work correctly on every platform, but that guarantee now
+       rests on CI's own separate Linux job rather than a contributor's local default build
+       surfacing a cross-platform break by accident. -->
+  <PropertyGroup>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(DESK_TOOLS_RID)</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
 </Project>
