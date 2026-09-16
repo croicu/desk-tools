@@ -5,7 +5,7 @@
       "name": ".NET: Run Service (CLI)",
       "type": "coreclr",
       "request": "launch",
-      "program": "${workspaceFolder}/out/Debug/net10.0/Service.dll",
+      "program": "${workspaceFolder}/out/Debug/net10.0/win-x64/Service.dll",
       "args": [],
       "cwd": "${workspaceFolder}/src/Service",
       "console": "integratedTerminal",
@@ -15,8 +15,20 @@
       "name": ".NET: Run Desk (CLI)",
       "type": "coreclr",
       "request": "launch",
-      "program": "${workspaceFolder}/out/Debug/net10.0/Desk.dll",
+      "program": "${workspaceFolder}/out/Debug/net10.0/win-x64/Desk.dll",
       "args": [],
+      "cwd": "${workspaceFolder}/src/Desk",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    },
+    {
+      "name": ".NET: Run Desk Ping (CLI)",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "${workspaceFolder}/out/Debug/net10.0/win-x64/Desk.dll",
+      "args": [
+        "ping"
+      ],
       "cwd": "${workspaceFolder}/src/Desk",
       "console": "integratedTerminal",
       "stopAtEntry": false
