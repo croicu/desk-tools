@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.56">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <!-- Reuses src/Directory.Build.props' own BaseOutputPath/RuntimeIdentifier default rather than
+       duplicating them, since scripts/ isn't a descendant of src/ or tests/, so MSBuild's own
+       Directory.Build.props auto-import wouldn't find either of those files walking up from here,
+       needing an explicit Import instead. Resolving to the identical shared out/<Configuration>/
+       net10.0/[<RID>/] folder Service.csproj/Hello.csproj/Desk.csproj already build into is the
+       whole point: it means a Python tool and its registry entry land co-located with Service.exe
+       exactly like a .NET tool's own .dll already does, so McpToolLauncher's existing "args resolved
+       relative to the registry's own directory" convention (see issue #29) continues to work
+       unchanged here too, no new path-resolution logic needed anywhere. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\src\Directory.Build.props" />
+
+  <!-- Each item is one Python MCP tool: "goodbye" implies both the script file (scripts/goodbye.py)
+       and the registry entry's own name, mirroring <McpToolName>'s per-project opt-in for .NET
+       tools (see src/Directory.Build.targets), just item-based instead of property-based, since
+       this one NoTargets project covers every Python tool rather than one project per tool. -->
+  <ItemGroup>
+    <McpPythonTool Include="goodbye" />
+    <McpPythonTool Include="link-program-files" />
+    <McpPythonTool Include="unlink-program-files" />
+  </ItemGroup>
+
+  <Target Name="CopyPythonMcpTools" AfterTargets="Build" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(OutDir)%(McpPythonTool.Identity).py">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyPythonMcpToolsToPublish" AfterTargets="Publish" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(PublishDir)%(McpPythonTool.Identity).py">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Same registry fragment shape as src/Directory.Build.targets' own GenerateMcpRegistryEntry,
+       "command": "python" instead of "dotnet" is the one difference (see that target's own remarks
+       on why this, not a separate "type": "dotnet"-style field, is the extensibility point this
+       registry was always meant to have). Batched via Inputs/Outputs over @(McpPythonTool) so this
+       runs once per tool, one file each, same "avoid a race between tools writing one combined
+       file" reasoning as the .NET-side targets. -->
+  <Target Name="GeneratePythonMcpRegistryEntries" AfterTargets="Build" Inputs="@(McpPythonTool)" Outputs="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json">
+    <MakeDir Directories="$(OutDir)mcp-registry\" />
+    <WriteLinesToFile
+        File="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Overwrite="true" />
+  </Target>
+
+  <Target Name="GeneratePythonMcpRegistryEntriesForPublish" AfterTargets="Publish" Inputs="@(McpPythonTool)" Outputs="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json">
+    <MakeDir Directories="$(PublishDir)mcp-registry\" />
+    <WriteLinesToFile
+        File="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Overwrite="true" />
+  </Target>
+
+</Project>

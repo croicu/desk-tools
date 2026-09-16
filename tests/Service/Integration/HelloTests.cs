@@ -32,7 +32,7 @@ public sealed class HelloTests
     [TestMethod]
     public void Launch_RealHelloEntry_InitializeRequestGetsARealResponse()
     {
-        var outDir = ResolveOutDir();
+        var outDir = RepoPaths.ResolveOutDir();
         var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
         Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build`).");
 
@@ -69,7 +69,7 @@ public sealed class HelloTests
     [TestMethod]
     public void Mcp_RealHelloEntry_DuplicatedHandlesCarryARealInitializeExchange()
     {
-        var outDir = ResolveOutDir();
+        var outDir = RepoPaths.ResolveOutDir();
         if (!string.Equals(new DirectoryInfo(outDir).Name, "win-x64", StringComparison.OrdinalIgnoreCase))
         {
             Assert.Inconclusive($"This test needs the real Windows HandleDuplicator -- win-x64 is src/Directory.Build.props' own default, but this build resolved to '{outDir}'. See issue #32.");
@@ -132,61 +132,4 @@ public sealed class HelloTests
         }
     }
 
-    /// <summary>
-    /// Mirrors this test assembly's own <c>net10.0[/&lt;RID&gt;]</c> structure onto
-    /// <c>out/&lt;Configuration&gt;/net10.0/</c>, since src/Directory.Build.props and
-    /// tests/Directory.Build.props apply the identical default <c>RuntimeIdentifier</c> (win-x64
-    /// today -- see src/Directory.Build.props' own remarks) -- whatever RID segment (if any) this
-    /// test itself landed under is exactly what Hello.csproj's own build landed under too, so this
-    /// stays correct if that default ever changes or gets overridden (e.g. `dotnet test -r
-    /// linux-x64`), rather than hardcoding "win-x64" as a literal path segment. Mirrors
-    /// tests/Desk/Integration/ServiceTests.cs's own identical helper.
-    /// </summary>
-    private static string ResolveOutDir()
-    {
-        var testDir = new DirectoryInfo(AppContext.BaseDirectory);
-        string? ridSegment = null;
-        if (!string.Equals(testDir.Name, "net10.0", StringComparison.OrdinalIgnoreCase))
-        {
-            ridSegment = testDir.Name;
-            testDir = testDir.Parent!;
-        }
-
-        var configuration = FindConfigurationFolder(testDir);
-        var outDir = Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
-        return ridSegment is null ? outDir : Path.Combine(outDir, ridSegment);
-    }
-
-    /// <summary>
-    /// Walks up looking for a folder literally named "Debug"/"Release", rather than assuming a
-    /// fixed parent-hop count -- robust regardless of how many RID/net10.0 segments sit above it.
-    /// </summary>
-    private static string FindConfigurationFolder(DirectoryInfo start)
-    {
-        for (var dir = start; dir is not null; dir = dir.Parent)
-        {
-            if (dir.Name is "Debug" or "Release")
-            {
-                return dir.Name;
-            }
-        }
-
-        throw new InvalidOperationException($"Could not determine the build configuration from '{start.FullName}'.");
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Service.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        if (dir is null)
-        {
-            throw new InvalidOperationException($"Could not locate the repo root (Service.slnx) above '{AppContext.BaseDirectory}'.");
-        }
-
-        return dir.FullName;
-    }
 }

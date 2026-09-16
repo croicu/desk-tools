@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Desk.Tests.Integration;
 
@@ -42,7 +43,7 @@ public sealed class ServiceTests
     [TestMethod]
     public void Ping_ThenShutdown_AgainstAManuallyStartedService()
     {
-        var serviceDllPath = Path.Combine(ResolveOutDir(), "Service.dll");
+        var serviceDllPath = Path.Combine(RepoPaths.ResolveOutDir(), "Service.dll");
         Assert.IsTrue(File.Exists(serviceDllPath), $"Service.dll not found at '{serviceDllPath}' -- build Service first (e.g. `dotnet build`).");
 
         var startInfo = new ProcessStartInfo("dotnet")
@@ -90,7 +91,7 @@ public sealed class ServiceTests
     [TestMethod]
     public void Mcp_LaunchesRealHelloEntry_ProxiesARealInitializeExchange()
     {
-        var outDir = ResolveOutDir();
+        var outDir = RepoPaths.ResolveOutDir();
         if (!string.Equals(new DirectoryInfo(outDir).Name, "win-x64", StringComparison.OrdinalIgnoreCase))
         {
             Assert.Inconclusive($"This test needs the real Windows HandleDuplicator -- win-x64 is src/Directory.Build.props' own default, but this build resolved to '{outDir}'. See issue #33/#32.");
@@ -188,65 +189,4 @@ public sealed class ServiceTests
         Assert.Fail("Service never became reachable within the startup wait.");
     }
 
-    /// <summary>
-    /// Mirrors this test assembly's own <c>net10.0[/&lt;RID&gt;]</c> structure onto
-    /// <c>out/&lt;Configuration&gt;/net10.0/</c>, since src/Directory.Build.props and
-    /// tests/Directory.Build.props apply the identical default <c>RuntimeIdentifier</c> (win-x64
-    /// today -- see src/Directory.Build.props' own remarks) -- whatever RID segment (if any) this
-    /// test itself landed under is exactly what Service.csproj/Desk.csproj's own build landed under
-    /// too, so this stays correct if that default ever changes or gets overridden (e.g.
-    /// `dotnet test -r linux-x64`), rather than hardcoding "win-x64" as a literal path segment.
-    /// </summary>
-    private static string ResolveOutDir()
-    {
-        var testDir = new DirectoryInfo(AppContext.BaseDirectory);
-        string? ridSegment = null;
-        if (!string.Equals(testDir.Name, "net10.0", StringComparison.OrdinalIgnoreCase))
-        {
-            ridSegment = testDir.Name;
-            testDir = testDir.Parent!;
-        }
-
-        var configuration = FindConfigurationFolder(testDir);
-        var outDir = Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
-        return ridSegment is null ? outDir : Path.Combine(outDir, ridSegment);
-    }
-
-    /// <summary>
-    /// Walks up looking for a folder literally named "Debug"/"Release", rather than assuming a
-    /// fixed parent-hop count -- robust regardless of how many RID/net10.0 segments sit above it.
-    /// </summary>
-    private static string FindConfigurationFolder(DirectoryInfo start)
-    {
-        for (var dir = start; dir is not null; dir = dir.Parent)
-        {
-            if (dir.Name is "Debug" or "Release")
-            {
-                return dir.Name;
-            }
-        }
-
-        throw new InvalidOperationException($"Could not determine the build configuration from '{start.FullName}'.");
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly's own directory looking for Service.slnx (a repo-root
-    /// marker) rather than hardcoding a fixed number of parent hops -- robust to the exact bin/obj
-    /// folder depth without needing to keep this in sync if that ever changes.
-    /// </summary>
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Service.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        if (dir is null)
-        {
-            throw new InvalidOperationException($"Could not locate the repo root (Service.slnx) above '{AppContext.BaseDirectory}'.");
-        }
-
-        return dir.FullName;
-    }
 }

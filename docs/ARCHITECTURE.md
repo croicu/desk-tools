@@ -283,6 +283,31 @@ stdio transport requires whatever process launches a server to also hold its std
 which a proxying Service would satisfy by keeping the pipes itself and relaying bytes, instead of
 handing them off the way `HandleDuplicator` does.
 
+`scripts/Scripts.csproj`/`scripts/goodbye.py`: the first non-.NET MCP registry entry -- a
+`Microsoft.Build.NoTargets` project (no C# of its own, just custom MSBuild targets) since Python
+tools live in `scripts/` (edited/checked in there, matching `shutdown_service.py`/
+`service_mcp_server.py`'s own home) rather than each getting a `src/`-style per-tool project.
+Explicitly `<Import>`s `src/Directory.Build.props` (`scripts/` isn't a descendant of `src/` or
+`tests/`, so MSBuild's own auto-import wouldn't find it) specifically to reuse its
+`BaseOutputPath`/`RuntimeIdentifier` default rather than duplicating them -- the whole point being
+that a Python tool's build-time destination is the *identical* shared `out/<Configuration>/
+net10.0/[<RID>/]` folder `Service.csproj`/`Hello.csproj`/`Desk.csproj` already build into. An
+`<McpPythonTool Include="goodbye" />` item (mirroring `<McpToolName>`'s per-project opt-in for .NET
+tools, just item-based since this one project covers every Python tool) drives two pairs of
+targets, batched via `Inputs`/`Outputs` over the item so each runs once per tool: one pair copies
+`scripts/<name>.py` into `$(OutDir)`/`$(PublishDir)` (`AfterTargets="Build"`/`"Publish"`, mirroring
+`Directory.Build.targets`' own `CopySettingsToOutput`/`ToPublish` split), the other writes that
+tool's own `mcp-registry/<name>.json` fragment there (`"command": "python"` instead of `"dotnet"`,
+otherwise identical shape to `GenerateMcpRegistryEntry`'s own output below). Because the script ends
+up co-located with `Service.exe` exactly like a .NET tool's own `.dll` already is,
+`McpToolLauncher`/`ToolLauncher` need zero Python-specific code -- the existing "args resolved
+relative to the registry's own directory" convention already just works. `scripts/goodbye.py`
+itself mirrors `service_mcp_server.py`'s own hand-rolled JSON-RPC shape (no SDK, same protocol
+version/error codes) but fully self-contained -- one tool, `say_goodbye`, returning `"Bye from
+MCP"`, no `find_repo_root`/settings-reading logic needed since it has no Service-control behavior
+of its own. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
+real Python process) and by `tests/Service/Integration/GoodbyeTests.cs`.
+
 `src/Service/ToolLauncher.cs`/`ToolProcess.cs` (see
 [issue #30](https://github.com/croicu/desk-tools/issues/30)): the process+pipes primitive
 `McpToolLauncher`/`HandleDuplicator` are built on. `ToolLauncher.Launch` is a generic
