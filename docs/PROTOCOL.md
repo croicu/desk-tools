@@ -174,6 +174,12 @@ key; this registry is one file per tool, so there's no such key to borrow one fr
   resolvable relative to the registry file's own directory, not a full or repo-relative path.
 - `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
 
-Purely the generation side today -- nothing reads this file yet. `src/Hello` is the one tool
-registered so far; a future non-.NET (e.g. Python) tool could add its own entry to the same folder
-by convention, without needing any of this MSBuild machinery itself.
+`src/Hello` is the one tool registered so far; a future non-.NET (e.g. Python) tool could add its
+own entry to the same folder by convention, without needing any of this MSBuild machinery itself.
+
+`src/Service/McpToolLauncher.cs` (see [issue #30](https://github.com/croicu/desk-tools/issues/30)
+and `docs/ARCHITECTURE.md`'s own entry) is the first consumer: given a registry name, it reads and
+parses that tool's fragment and spawns it as a child process with redirected stdin/stdout via
+`src/Service/ToolLauncher.cs`. Still just that process+pipes primitive -- not yet wired to any
+external trigger (no echo/wire-protocol command, no `.mcp.json` changes, no actual MCP JSON-RPC
+proxying through a client connection).

@@ -238,13 +238,45 @@ Deliberately a property, not an item, unlike `CopySettingsToOutput`'s own `setti
 `settings.local.json` `Copy` tasks above -- MSBuild properties don't propagate to a referencing
 project's own build the way items can, so `Hello.Tests` referencing `Hello.csproj` doesn't also
 pick up a registry entry the way `CopyToOutputDirectory` items once leaked into every test project
-(see that same section's own history). Purely the generation side for now -- nothing reads this
-registry yet; `Host`/`Service` becoming the thing that actually launches registered tools (rather
-than Claude Code doing so directly via `.mcp.json`, as today) is a deliberately separate, larger,
-not-yet-started piece, since MCP's stdio transport requires whatever process launches a server to
-also hold its stdin/stdout pipes -- Service becoming that launcher would mean `.mcp.json` pointing
-at Service instead of `Hello.dll` directly, with Service proxying stdio JSON-RPC through to the
-process it manages.
+(see that same section's own history). `src/Service/McpToolLauncher.cs` is the first, still-partial
+consumer (see below) -- `Host`/`Service` actually proxying a client connection's own MCP JSON-RPC
+traffic through to a registered tool (rather than Claude Code launching one directly via `.mcp.json`,
+as today) remains a deliberately separate, larger, not-yet-started piece, since MCP's stdio transport
+requires whatever process launches a server to also hold its stdin/stdout pipes -- Service becoming
+that launcher would mean `.mcp.json` pointing at Service instead of `Hello.dll` directly, with
+Service proxying stdio JSON-RPC through to the process it manages.
+
+`src/Service/ToolLauncher.cs`/`ToolProcess.cs` (see
+[issue #30](https://github.com/croicu/desk-tools/issues/30)): the process+pipes primitive underneath
+that future proxying work, built as its own first increment. `ToolLauncher.Launch` is a generic
+child-process spawn given an already-resolved `command`/`args`/`env`/working directory -- both
+standard input and standard output redirected (`UseShellExecute = false`), no BOM on the write side
+(same `Encoding(encoderShouldEmitUTF8Identifier: false)` reasoning as `Host.WriteEncoding`/
+`Client.WriteEncoding`, since a redirected child's default `StandardInputEncoding` is the OS
+codepage, not UTF-8, and a real `Encoding.UTF8` would prepend a BOM a stdio JSON-RPC reader doesn't
+expect) -- wraps the result in `ToolProcess`, a thin `IDisposable` exposing just
+`StandardInput`/`StandardOutput`/`HasExited` (`Dispose` closes stdin first, so a well-behaved tool
+sees EOF and exits its own read loop gracefully, the same shutdown path a real client disconnect
+takes, before waiting briefly and disposing the underlying `Process`). Deliberately has no notion of
+the MCP tool registry itself, kept generic so a future non-registry-sourced process could reuse it.
+Wraps a `Process.Start` `Win32Exception` (the executable can't be found/launched at all) and a plain
+null return alike into `AppError`, matching this repo's usual error-surfacing convention rather than
+letting a raw BCL exception escape.
+
+`src/Service/McpToolLauncher.cs`: the registry-aware layer on top of `ToolLauncher` -- given a tool's
+registry name, resolves `mcp-registry/<name>.json` from `AppContext.BaseDirectory` (Service's own
+directory; overridable via an optional `registryBaseDirectory` testing seam, defaulting to
+production behavior, the same pattern as `Host`'s own `port` constructor parameter), parses the full
+`.mcp.json`-shaped fragment (`command`/`args`/`env`), and calls `ToolLauncher.Launch` with the
+registry's own directory as the working directory (matching `args`' paths, which are relative to
+it, not to whichever process happens to be calling this). `AppError` on a missing registry file,
+malformed JSON, or a fragment missing/misshaping any of `command`/`args`/`env`. Still just the
+process+pipes primitive (issue #30's own deliberate scope) -- no wire-protocol/echo-command trigger
+yet, no actual MCP JSON-RPC proxying through an external client connection; verified end-to-end by
+`tests/Service/Integration/HelloTests.cs`, which launches the real, build-generated `hello` registry
+entry, sends a real `initialize` request over the redirected stdin, and reads back a real MCP
+response over the redirected stdout -- confirming the pipes carry working stdio traffic, not just
+that a process object exists.
 
 ## Data flow
 
