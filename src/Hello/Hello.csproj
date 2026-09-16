@@ -6,6 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Opts this project into src/Directory.Build.targets' MCP tool registry generation (see
+         issue #29): a property, not an item, specifically so it doesn't propagate to Hello.Tests
+         via its own ProjectReference on this project (properties aren't inherited that way; items
+         are, which is exactly what bit settings.json's own CopyToOutputDirectory item earlier). -->
+    <McpToolName>hello</McpToolName>
   </PropertyGroup>
 
   <ItemGroup>

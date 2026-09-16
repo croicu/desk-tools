@@ -36,4 +36,51 @@
     <Copy SourceFiles="$(MSBuildThisFileDirectory)..\settings.json" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- Build-time MCP tool registry (see issue #29): a project opts in by setting <McpToolName> in
+       its own PropertyGroup (e.g. src/Hello/Hello.csproj sets <McpToolName>hello</McpToolName>),
+       a property, not an item, so it doesn't propagate to a referencing test project's own build
+       the way CopyToOutputDirectory items did to settings.json above; MSBuild properties are
+       private to the project that sets them. One small JSON file per tool
+       ($(OutDir)mcp-registry/<name>.json or $(PublishDir)mcp-registry/<name>.json, see the two
+       targets below), not one combined file: avoids a real race between two projects both trying to
+       write the same combined file during a parallel build, and needs no cross-project item
+       aggregation.
+
+       Each entry is a full .mcp.json-shaped server fragment (type/command/args/env, matching that
+       file's own "hello" entry exactly), plus a "name" field .mcp.json itself doesn't need (there,
+       the tool's name is the surrounding object's own key; this registry is one file per tool, so
+       there's no such key to borrow one from). "command": "dotnet" (not a separate "type": "dotnet"
+       field, since .mcp.json's own "type" already means transport, "stdio", so a same-named field
+       with a different meaning would collide) is what a future non-.NET entry would instead set to
+       something else (e.g. "python"), the same extensibility goal, without the collision. "args"
+       holds $(TargetFileName) (e.g. "Hello.dll"), the bare built file name, resolvable relative to
+       the registry file's own directory: the registry and the file it references always land in the
+       same folder, whether that's the shared $(OutDir) (src/Directory.Build.props' BaseOutputPath)
+       or $(PublishDir) (installer/Setup.wixproj now publishes Hello.csproj alongside
+       Service.csproj into the same $(AppPublishDir) specifically so this holds there too, see that
+       project's own PublishAppForSetup remarks). "env" is always {} for now, nothing needs a
+       per-tool env var yet. Deliberately just the generation side for now: no consumer reads this
+       yet. -->
+  <Target Name="GenerateMcpRegistryEntry" AfterTargets="Build" Condition="'$(McpToolName)' != ''">
+    <PropertyGroup>
+      <McpRegistryDir>$(OutDir)mcp-registry\</McpRegistryDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(McpRegistryDir)" />
+    <WriteLinesToFile
+        File="$(McpRegistryDir)$(McpToolName).json"
+        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}}"
+        Overwrite="true" />
+  </Target>
+
+  <Target Name="GenerateMcpRegistryEntryForPublish" AfterTargets="Publish" Condition="'$(McpToolName)' != ''">
+    <PropertyGroup>
+      <McpRegistryPublishDir>$(PublishDir)mcp-registry\</McpRegistryPublishDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(McpRegistryPublishDir)" />
+    <WriteLinesToFile
+        File="$(McpRegistryPublishDir)$(McpToolName).json"
+        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}}"
+        Overwrite="true" />
+  </Target>
+
 </Project>

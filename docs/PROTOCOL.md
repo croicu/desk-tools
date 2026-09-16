@@ -143,3 +143,37 @@ module nor working-directory tier has a file, `Load()` falls back to restrictive
 - `port` (number, default `51823`) -- loopback TCP port `src/Service`'s `Host` listens on and
   `src/Desk` connects to (see the Echo protocol section above). Both processes read this from the
   same shared settings.json, with no direct dependency between them beyond that.
+
+### MCP tool registry -- `mcp-registry/<name>.json`
+
+Build-time-generated, not hand-written or checked in (see [issue #29](https://github.com/croicu/desk-tools/issues/29)
+and `docs/ARCHITECTURE.md`'s `Directory.Build.targets` entry) -- one small file per MCP tool,
+written to `$(OutDir)mcp-registry/` after a plain `dotnet build` (the same shared output folder
+settings.json itself lands in) or `$(PublishDir)mcp-registry/` after `dotnet publish` (including the
+MSI's own publish step, `installer/Setup.wixproj`, which now publishes `Hello.csproj` alongside
+`Service.csproj`/`Desk.csproj` specifically so this ends up shipped there too), by any project that
+opts in via its own `<McpToolName>` MSBuild property. Each file is a full `.mcp.json`-shaped server
+fragment (`type`/`command`/`args`/`env`, matching that file's own `"hello"` entry exactly) plus a
+`name` field `.mcp.json` itself doesn't need (there, the tool's name is the surrounding object's own
+key; this registry is one file per tool, so there's no such key to borrow one from):
+
+```json
+{"name": "hello", "type": "stdio", "command": "dotnet", "args": ["Hello.dll"], "env": {}}
+```
+
+- `name` (string) -- the tool's registry name, from the opted-in project's own `<McpToolName>`
+  (e.g. `"hello"`).
+- `type` (string) -- MCP transport, always `"stdio"` for now (every tool this registry currently
+  describes uses it).
+- `command` (string) -- always `"dotnet"` for an entry this MSBuild-based generation produces
+  (every project it can run against is necessarily a .NET one). A future non-.NET (e.g. Python)
+  tool's own entry would set this to something else (e.g. `"python"`) instead -- deliberately not a
+  separate `"type": "dotnet"`-style field, since `.mcp.json`'s own `type` already means transport, a
+  same-named field with a different meaning would collide.
+- `args` (array of strings) -- the built file's bare name (`$(TargetFileName)`, e.g. `"Hello.dll"`),
+  resolvable relative to the registry file's own directory, not a full or repo-relative path.
+- `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
+
+Purely the generation side today -- nothing reads this file yet. `src/Hello` is the one tool
+registered so far; a future non-.NET (e.g. Python) tool could add its own entry to the same folder
+by convention, without needing any of this MSBuild machinery itself.

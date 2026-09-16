@@ -141,6 +141,15 @@ Runs at the installing user's own logon (their interactive token, highest privil
 allows), started immediately after install too rather than only from the next logon; cleaned up
 on rollback/genuine uninstall.
 
+`installer/Setup.wixproj`'s `PublishAppForSetup` target publishes `Service.csproj`, `Hello.csproj`,
+and `Desk.csproj` -- all three, not Service alone -- into the same shared `$(AppPublishDir)`
+`Package.wxs`'s `Files` glob bundles wholesale (see issue #29): none of the three reference each
+other, so publishing only one would never pull the others in, and `Hello`'s own build-time-generated
+`mcp-registry/hello.json` (see `docs/PROTOCOL.md`) would otherwise reference a `Hello.dll` that was
+never actually shipped in the MSI at all. Confirmed by reading the built `.msi`'s own `File` table
+directly, not just the intermediate publish folder -- `Hello.exe`/`Desk.exe`/`Service.exe` and
+`mcp-registry/hello.json` are all genuinely embedded.
+
 `src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
 `docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
 requests from stdin in a loop until EOF (or a `stop` tool call, below) ends it, dispatches
@@ -218,6 +227,24 @@ in this repo) shut `Host` down as a normal tool call, the same way `src/Hello`'s
 lets one gracefully stop Hello -- see the `stop-service` skill under `.claude/skills/` (mirroring
 the earlier `stop-hello` one), which calls `mcp__service__shutdown` instead of killing the process
 when a build is blocked by a locked `Service.dll`/`Base.dll`.
+
+`src/Directory.Build.targets`'s `GenerateMcpRegistryEntry` target (see `docs/PROTOCOL.md`'s MCP
+tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/29)): a first,
+deliberately small step toward CLAUDE.md's own Mission ("a service for running MCP servers... at a
+high privilege mode") -- at build time, writes one small `{"name": ..., "reference": ...}` JSON file
+per MCP tool into `$(OutDir)mcp-registry/`, for any project that opts in via its own
+`<McpToolName>` property (`src/Hello/Hello.csproj` sets `<McpToolName>hello</McpToolName>`).
+Deliberately a property, not an item, unlike `CopySettingsToOutput`'s own `settings.json`/
+`settings.local.json` `Copy` tasks above -- MSBuild properties don't propagate to a referencing
+project's own build the way items can, so `Hello.Tests` referencing `Hello.csproj` doesn't also
+pick up a registry entry the way `CopyToOutputDirectory` items once leaked into every test project
+(see that same section's own history). Purely the generation side for now -- nothing reads this
+registry yet; `Host`/`Service` becoming the thing that actually launches registered tools (rather
+than Claude Code doing so directly via `.mcp.json`, as today) is a deliberately separate, larger,
+not-yet-started piece, since MCP's stdio transport requires whatever process launches a server to
+also hold its stdin/stdout pipes -- Service becoming that launcher would mean `.mcp.json` pointing
+at Service instead of `Hello.dll` directly, with Service proxying stdio JSON-RPC through to the
+process it manages.
 
 ## Data flow
 
