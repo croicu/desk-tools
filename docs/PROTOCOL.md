@@ -200,7 +200,7 @@ this registry is one file per tool, so there's no such key to borrow one from):
 ```
 
 ```json
-{"name": "goodbye", "type": "stdio", "command": "python", "args": ["goodbye.py"], "env": {}}
+{"name": "goodbye", "type": "stdio", "command": "python", "args": ["scripts/goodbye.py"], "env": {}}
 ```
 
 - `name` (string) -- the tool's registry name, from the opted-in project's own `<McpToolName>`
@@ -211,12 +211,15 @@ this registry is one file per tool, so there's no such key to borrow one from):
   `scripts/Scripts.csproj`) -- deliberately not a separate `"type": "dotnet"`-style field, since
   `.mcp.json`'s own `type` already means transport, a same-named field with a different meaning
   would collide. Whatever a tool's own runtime is, this is the extensibility point for it.
-- `args` (array of strings) -- the tool file's bare name (`$(TargetFileName)` for a .NET entry, e.g.
-  `"Hello.dll"`; the script's own file name for a Python one, e.g. `"goodbye.py"`), resolvable
-  relative to the registry file's own directory, not a full or repo-relative path -- true for Python
-  tools too, since `scripts/Scripts.csproj` copies the `.py` file into that same shared output
-  folder at build time specifically so this holds (see that project's own remarks on why: it means
-  `McpToolLauncher` needs no Python-specific path-resolution logic at all).
+- `args` (array of strings) -- the tool file's bare name for a .NET entry (`$(TargetFileName)`, e.g.
+  `"Hello.dll"`, sitting right next to the registry); a Python entry's own script instead sits one
+  level down, in that same folder's `scripts/` subfolder (e.g. `"scripts/goodbye.py"`), since
+  `scripts/Scripts.csproj` copies `.py` files there rather than flat (keeps the repo's own
+  `scripts/` layout mirrored in the build output). Either way, still resolvable relative to the
+  registry file's own directory, not a full or repo-relative path -- `McpToolLauncher` needs no
+  Python-specific path-resolution logic either way, since "resolve relative to the registry's own
+  directory" already covers a subfolder path like any other relative path (see that project's own
+  remarks).
 - `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
 
 `src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools

@@ -290,18 +290,26 @@ tools live in `scripts/` (edited/checked in there, matching `shutdown_service.py
 Explicitly `<Import>`s `src/Directory.Build.props` (`scripts/` isn't a descendant of `src/` or
 `tests/`, so MSBuild's own auto-import wouldn't find it) specifically to reuse its
 `BaseOutputPath`/`RuntimeIdentifier` default rather than duplicating them -- the whole point being
-that a Python tool's build-time destination is the *identical* shared `out/<Configuration>/
-net10.0/[<RID>/]` folder `Service.csproj`/`Hello.csproj`/`Desk.csproj` already build into. An
+that a Python tool's build-time destination is that *identical* shared `out/<Configuration>/
+net10.0/[<RID>/]` folder `Service.csproj`/`Hello.csproj`/`Desk.csproj` already build into, just one
+level down: the `.py` files themselves land in a `scripts/` subfolder of it (mirroring the repo's
+own `scripts/` layout), while `mcp-registry/<name>.json` still lands directly in that shared
+folder, right next to `Service.exe`, same as a .NET tool's own registry entry. An
 `<McpPythonTool Include="goodbye" />` item (mirroring `<McpToolName>`'s per-project opt-in for .NET
 tools, just item-based since this one project covers every Python tool) drives two pairs of
 targets, batched via `Inputs`/`Outputs` over the item so each runs once per tool: one pair copies
-`scripts/<name>.py` into `$(OutDir)`/`$(PublishDir)` (`AfterTargets="Build"`/`"Publish"`, mirroring
-`Directory.Build.targets`' own `CopySettingsToOutput`/`ToPublish` split), the other writes that
-tool's own `mcp-registry/<name>.json` fragment there (`"command": "python"` instead of `"dotnet"`,
-otherwise identical shape to `GenerateMcpRegistryEntry`'s own output below). Because the script ends
-up co-located with `Service.exe` exactly like a .NET tool's own `.dll` already is,
-`McpToolLauncher`/`ToolLauncher` need zero Python-specific code -- the existing "args resolved
-relative to the registry's own directory" convention already just works. `scripts/goodbye.py`
+`scripts/<name>.py` into `$(OutDir)scripts\`/`$(PublishDir)scripts\` (`AfterTargets="Build"`/
+`"Publish"`, mirroring `Directory.Build.targets`' own `CopySettingsToOutput`/`ToPublish` split), the
+other writes that tool's own `mcp-registry/<name>.json` fragment directly in `$(OutDir)`/
+`$(PublishDir)` (`"command": "python"` instead of `"dotnet"`, `"args": ["scripts/<name>.py"]`
+instead of a bare `$(TargetFileName)`, otherwise identical shape to `GenerateMcpRegistryEntry`'s own
+output below). Because the registry stays co-located with `Service.exe` exactly like a .NET tool's
+own `.dll` already is, `McpToolLauncher`/`ToolLauncher` need zero Python-specific code -- "args
+resolved relative to the registry's own directory" already covers a `scripts/<name>.py`-shaped
+relative path exactly like it covers a bare one, no new path-resolution logic needed anywhere.
+`link-program-files.py`'s own target-directory computation accounts for this same one-level offset
+(walks up two directories from `__file__`, not one, to land back on `$(OutDir)` itself rather than
+its own `scripts/` subfolder -- see that script's own remarks). `scripts/goodbye.py`
 itself mirrors `service_mcp_server.py`'s own hand-rolled JSON-RPC shape (no SDK, same protocol
 version/error codes) but fully self-contained -- one tool, `say_goodbye`, returning `"Bye from
 MCP"`, no `find_repo_root`/settings-reading logic needed since it has no Service-control behavior

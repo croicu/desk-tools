@@ -9,10 +9,13 @@
        Directory.Build.props auto-import wouldn't find either of those files walking up from here,
        needing an explicit Import instead. Resolving to the identical shared out/<Configuration>/
        net10.0/[<RID>/] folder Service.csproj/Hello.csproj/Desk.csproj already build into is the
-       whole point: it means a Python tool and its registry entry land co-located with Service.exe
-       exactly like a .NET tool's own .dll already does, so McpToolLauncher's existing "args resolved
-       relative to the registry's own directory" convention (see issue #29) continues to work
-       unchanged here too, no new path-resolution logic needed anywhere. -->
+       whole point: a Python tool's own mcp-registry/<name>.json still lands right there, next to
+       everything else's, so McpToolLauncher's existing "the registry lives in Service's own
+       directory" lookup (see issue #29) continues to work unchanged. The scripts themselves land
+       one level down, in a scripts\ subfolder of that same shared folder (see
+       CopyPythonMcpTools/ToPublish below); args resolve relative to the registry's own directory
+       too, so each entry's own args just spell out "scripts/<name>.py" instead of "<name>.py" to
+       say so, no new path-resolution logic needed in McpToolLauncher either way. -->
   <Import Project="$(MSBuildThisFileDirectory)..\src\Directory.Build.props" />
 
   <!-- Each item is one Python MCP tool: "goodbye" implies both the script file (scripts/goodbye.py)
@@ -25,12 +28,12 @@
     <McpPythonTool Include="unlink-program-files" />
   </ItemGroup>
 
-  <Target Name="CopyPythonMcpTools" AfterTargets="Build" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(OutDir)%(McpPythonTool.Identity).py">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  <Target Name="CopyPythonMcpTools" AfterTargets="Build" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(OutDir)scripts\%(McpPythonTool.Identity).py">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(OutDir)scripts\" SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyPythonMcpToolsToPublish" AfterTargets="Publish" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(PublishDir)%(McpPythonTool.Identity).py">
-    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  <Target Name="CopyPythonMcpToolsToPublish" AfterTargets="Publish" Inputs="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" Outputs="$(PublishDir)scripts\%(McpPythonTool.Identity).py">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)%(McpPythonTool.Identity).py" DestinationFolder="$(PublishDir)scripts\" SkipUnchangedFiles="true" />
   </Target>
 
   <!-- Same registry fragment shape as src/Directory.Build.targets' own GenerateMcpRegistryEntry,
@@ -43,7 +46,7 @@
     <MakeDir Directories="$(OutDir)mcp-registry\" />
     <WriteLinesToFile
         File="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json"
-        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
         Overwrite="true" />
   </Target>
 
@@ -51,7 +54,7 @@
     <MakeDir Directories="$(PublishDir)mcp-registry\" />
     <WriteLinesToFile
         File="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json"
-        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
         Overwrite="true" />
   </Target>
 
