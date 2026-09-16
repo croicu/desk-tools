@@ -12,6 +12,9 @@
     <Project Path="tests/Mocks/Mocks.csproj" />
     <Project Path="tests/Service/Service.Tests.csproj" />
   </Folder>
+  <Folder Name="/scripts/">
+    <Project Path="scripts/Scripts.csproj" />
+  </Folder>
   <Project Path="installer/Setup.vcxproj"
     Id="84296b96-0b8a-48e8-ab84-aa02acfdc3db">
     <Build Project="false" />

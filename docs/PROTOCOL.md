@@ -187,31 +187,41 @@ and `docs/ARCHITECTURE.md`'s `Directory.Build.targets` entry) -- one small file 
 written to `$(OutDir)mcp-registry/` after a plain `dotnet build` (the same shared output folder
 settings.json itself lands in) or `$(PublishDir)mcp-registry/` after `dotnet publish` (including the
 MSI's own publish step, `installer/Setup.wixproj`, which now publishes `Hello.csproj` alongside
-`Service.csproj`/`Desk.csproj` specifically so this ends up shipped there too), by any project that
-opts in via its own `<McpToolName>` MSBuild property. Each file is a full `.mcp.json`-shaped server
-fragment (`type`/`command`/`args`/`env`, matching that file's own `"hello"` entry exactly) plus a
-`name` field `.mcp.json` itself doesn't need (there, the tool's name is the surrounding object's own
-key; this registry is one file per tool, so there's no such key to borrow one from):
+`Service.csproj`/`Desk.csproj` specifically so this ends up shipped there too). A .NET project opts
+in via its own `<McpToolName>` MSBuild property; a Python tool opts in via an `<McpPythonTool>` item
+in `scripts/Scripts.csproj` instead (see that project's own remarks and `docs/ARCHITECTURE.md`'s
+entry for it) -- either way, each file is a full `.mcp.json`-shaped server fragment
+(`type`/`command`/`args`/`env`, matching that file's own `"hello"` entry exactly) plus a `name`
+field `.mcp.json` itself doesn't need (there, the tool's name is the surrounding object's own key;
+this registry is one file per tool, so there's no such key to borrow one from):
 
 ```json
 {"name": "hello", "type": "stdio", "command": "dotnet", "args": ["Hello.dll"], "env": {}}
 ```
 
+```json
+{"name": "goodbye", "type": "stdio", "command": "python", "args": ["goodbye.py"], "env": {}}
+```
+
 - `name` (string) -- the tool's registry name, from the opted-in project's own `<McpToolName>`
-  (e.g. `"hello"`).
+  (.NET, e.g. `"hello"`) or `<McpPythonTool>` item (Python, e.g. `"goodbye"`).
 - `type` (string) -- MCP transport, always `"stdio"` for now (every tool this registry currently
   describes uses it).
-- `command` (string) -- always `"dotnet"` for an entry this MSBuild-based generation produces
-  (every project it can run against is necessarily a .NET one). A future non-.NET (e.g. Python)
-  tool's own entry would set this to something else (e.g. `"python"`) instead -- deliberately not a
-  separate `"type": "dotnet"`-style field, since `.mcp.json`'s own `type` already means transport, a
-  same-named field with a different meaning would collide.
-- `args` (array of strings) -- the built file's bare name (`$(TargetFileName)`, e.g. `"Hello.dll"`),
-  resolvable relative to the registry file's own directory, not a full or repo-relative path.
+- `command` (string) -- `"dotnet"` for a .NET-generated entry, `"python"` for a Python one (see
+  `scripts/Scripts.csproj`) -- deliberately not a separate `"type": "dotnet"`-style field, since
+  `.mcp.json`'s own `type` already means transport, a same-named field with a different meaning
+  would collide. Whatever a tool's own runtime is, this is the extensibility point for it.
+- `args` (array of strings) -- the tool file's bare name (`$(TargetFileName)` for a .NET entry, e.g.
+  `"Hello.dll"`; the script's own file name for a Python one, e.g. `"goodbye.py"`), resolvable
+  relative to the registry file's own directory, not a full or repo-relative path -- true for Python
+  tools too, since `scripts/Scripts.csproj` copies the `.py` file into that same shared output
+  folder at build time specifically so this holds (see that project's own remarks on why: it means
+  `McpToolLauncher` needs no Python-specific path-resolution logic at all).
 - `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
 
-`src/Hello` is the one tool registered so far; a future non-.NET (e.g. Python) tool could add its
-own entry to the same folder by convention, without needing any of this MSBuild machinery itself.
+`src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools
+registered so far -- both real MSBuild machinery in the end, just two different opt-in mechanisms
+for the two different kinds of project.
 
 `src/Service/McpToolLauncher.cs` (see [issue #30](https://github.com/croicu/desk-tools/issues/30)
 and `docs/ARCHITECTURE.md`'s own entry) is the first consumer: given a registry name, it reads and

@@ -2,10 +2,37 @@
   "mcpServers": {
     "hello": {
       "type": "stdio",
-      "command": "C:\\Program Files\\Desk Tools\\Desk.exe",
+      "command": "desk",
       "args": [
         "mcp",
         "hello"
+      ],
+      "env": {}
+    },
+    "goodbye": {
+      "type": "stdio",
+      "command": "desk",
+      "args": [
+        "mcp",
+        "goodbye"
+      ],
+      "env": {}
+    },
+    "link-program-files": {
+      "type": "stdio",
+      "command": "desk",
+      "args": [
+        "mcp",
+        "link-program-files"
+      ],
+      "env": {}
+    },
+    "unlink-program-files": {
+      "type": "stdio",
+      "command": "desk",
+      "args": [
+        "mcp",
+        "unlink-program-files"
       ],
       "env": {}
     },
