@@ -7,8 +7,42 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  # win-x64 is src/Directory.Build.props'/tests/Directory.Build.props' own default RuntimeIdentifier
+  # now (see their own remarks) -- this job needs no override at all, a plain `dotnet build`/`dotnet
+  # test` already exercises the real Platform/Windows/ implementations (SingletonGuard,
+  # HandleDuplicator) this project's actual mission depends on.
+  lint-and-test-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Format check
+        run: dotnet format --verify-no-changes
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test
+        run: dotnet test --no-build --settings mstest.runsettings --filter TestCategory!=Integration
+
+  # Kept alongside the Windows job specifically to enforce CLAUDE.md's Architecture convention 11
+  # (src/Base must work correctly on every platform .NET runs on) automatically, rather than relying
+  # on a contributor remembering to test it on a second OS by hand. DESK_TOOLS_RID=linux-x64
+  # overrides the win-x64 default -- see src/Directory.Build.props' own remarks for why this has to
+  # be an environment variable and not a command-line -r/`/p:RuntimeIdentifier=` flag (the .NET SDK
+  # rejects either of those outright once a solution, not a single project, is involved).
+  lint-and-test-linux:
     runs-on: ubuntu-latest
+    env:
+      DESK_TOOLS_RID: linux-x64
 
     steps:
       - uses: actions/checkout@v4

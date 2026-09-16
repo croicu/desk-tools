@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- Mirrors src/Directory.Build.props' own default (see its own remarks for the full reasoning),
+       deliberately a separate file rather than a shared one, since tests/ intentionally does not
+       pick up src/Directory.Build.props' BaseOutputPath override (test/mock assemblies stay
+       wherever dotnet test already expects them, only the shippable src/ binaries get collected
+       under out/). Applies to every test project here, including Base.Tests, same reasoning as the
+       src/ side: convention 11's cross-platform guarantee for Base now rests on CI's own separate
+       Linux job, not a contributor's local default build. -->
+  <PropertyGroup>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(DESK_TOOLS_RID)</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+</Project>

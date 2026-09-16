@@ -27,11 +27,14 @@
   </ItemGroup>
 
   <!-- Mirrors src/Service/Service.csproj's own Platform/-selection exactly, so this test project's
-       compiled-in SingletonGuardTests.cs pairs with whichever SingletonGuard variant that
-       ProjectReference itself actually compiled for the same RID: Unit/Platform/Windows/ tests the
-       real Mutex-based guard (only meaningful under `dotnet test -r win-x64`), Unit/Platform/Neutral/
-       tests the no-op variant's contract (what the default, no-RID `dotnet test` actually exercises),
-       and Unit/Platform/Linux/ likewise for `-r linux-x64`. -->
+       compiled-in SingletonGuardTests.cs/HandleDuplicatorTests.cs pair with whichever
+       SingletonGuard/HandleDuplicator variant that ProjectReference itself actually compiled for
+       the same RID: Unit/Platform/Windows/ tests the real Mutex-based guard/real DuplicateHandle
+       (win-x64 is tests/Directory.Build.props' own default now, so a plain `dotnet test` already
+       exercises these), Unit/Platform/Neutral/ tests the no-op/"not supported" stand-ins' own
+       contract (only reachable now via an explicit override, e.g. `DESK_TOOLS_RID` cleared, see
+       tests/Directory.Build.props' own remarks), and Unit/Platform/Linux/ likewise for
+       `DESK_TOOLS_RID=linux-x64`. -->
   <ItemGroup>
     <Compile Remove="Unit/Platform/**/*.cs" />
   </ItemGroup>

@@ -42,4 +42,23 @@ public sealed class ProgramTests
         Assert.AreEqual(DeskCommand.Shutdown, arguments.Command);
         Assert.AreEqual("/var/log/desk", arguments.LogDir);
     }
+
+    [TestMethod]
+    public void ParseArgs_Mcp_SetsCommandAndToolName()
+    {
+        var arguments = Program.ParseArgs(["mcp", "hello"]);
+
+        Assert.AreEqual(DeskCommand.Mcp, arguments.Command);
+        Assert.AreEqual("hello", arguments.McpToolName);
+    }
+
+    [TestMethod]
+    public void ParseArgs_McpWithLog_SetsAllThree()
+    {
+        var arguments = Program.ParseArgs(["mcp", "hello", "--log", "/var/log/desk"]);
+
+        Assert.AreEqual(DeskCommand.Mcp, arguments.Command);
+        Assert.AreEqual("hello", arguments.McpToolName);
+        Assert.AreEqual("/var/log/desk", arguments.LogDir);
+    }
 }

@@ -3,9 +3,10 @@ namespace Croicu.Desk.Tools.Service.Tests.Unit;
 /// <summary>
 /// Only compiled in when the test project itself is built for win-x64 (see
 /// tests/Service/Service.Tests.csproj's Platform/-selection ItemGroups, mirroring
-/// src/Service/Service.csproj's own) -- run explicitly with `dotnet test -r win-x64` to exercise
-/// these; the default `dotnet test` (no RID) instead compiles
-/// Platform/Neutral/SingletonGuardTests.cs, which tests the no-op variant's contract instead. A
+/// src/Service/Service.csproj's own) -- win-x64 is tests/Directory.Build.props' own default
+/// RuntimeIdentifier now, so a plain `dotnet test` already exercises these; an explicit
+/// `DESK_TOOLS_RID` override to something else (e.g. `linux-x64`, or cleared entirely) instead
+/// compiles Platform/Neutral/SingletonGuardTests.cs, which tests the no-op variant's contract. A
 /// GUID-suffixed mutex name per test (never the real <see cref="SingletonGuard.DefaultMutexName"/>)
 /// so parallel test methods (MSTestSettings.cs's method-level parallelization) never collide with
 /// each other or with a real running Service instance's own mutex.

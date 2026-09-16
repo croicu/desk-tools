@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from shutdown_service import SHUTDOWN_COMMAND, find_repo_root, request_shutdown, resolve_port
+from shutdown_service import find_repo_root, request_shutdown, resolve_port
 
 SUPPORTED_PROTOCOL_VERSION = "2025-06-18"
 SHUTDOWN_TOOL_NAME = "shutdown"
@@ -67,8 +67,8 @@ def handle_tools_list(id_: Any) -> None:
                 {
                     "name": SHUTDOWN_TOOL_NAME,
                     "description": (
-                        "Shuts down the Desk Tools Service resident process gracefully (sends the "
-                        "reserved shutdown line over its loopback TCP listener, waits for its "
+                        "Shuts down the Desk Tools Service resident process gracefully (sends a "
+                        "JSON-RPC shutdown request over its loopback TCP listener, waits for its "
                         "acknowledgment). Only call this when explicitly asked to stop/restart the "
                         "service -- never in response to an unrelated user message that happens to "
                         "mention stopping something else."
@@ -94,7 +94,7 @@ def handle_tools_call(id_: Any, params: Any) -> None:
     port = resolve_port(repo_root)
 
     try:
-        reply = request_shutdown(port)
+        request_shutdown(port)
     except OSError as error:
         # A runtime failure of the tool itself, not a malformed request -- isError: true on the
         # tool result, not a JSON-RPC protocol-level error (matches docs/PROTOCOL.md's existing
@@ -107,15 +107,8 @@ def handle_tools_call(id_: Any, params: Any) -> None:
             },
         )
         return
-
-    if reply != SHUTDOWN_COMMAND:
-        write_result(
-            id_,
-            {
-                "content": [{"type": "text", "text": f"Unexpected reply from service: {reply!r}"}],
-                "isError": True,
-            },
-        )
+    except ValueError as error:
+        write_result(id_, {"content": [{"type": "text", "text": str(error)}], "isError": True})
         return
 
     write_result(id_, {"content": [{"type": "text", "text": "Shutdown requested."}], "isError": False})

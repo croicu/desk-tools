@@ -6,10 +6,11 @@
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
 
-    <!-- WinExe (no console, no taskbar entry) only when explicitly targeting win-x64; plain Exe
-         (normal console subsystem, also what a bare `dotnet build`/`run` with no RID gets) for
-         everything else, including linux-x64's ELF output, which has no subsystem header to set
-         regardless but keeps the property semantically correct. See tasks/wingui-console-poc.md. -->
+    <!-- WinExe (no console, no taskbar entry) when targeting win-x64, src/Directory.Build.props'
+         own default RuntimeIdentifier now, so a bare `dotnet build`/`run` gets this too, not just an
+         explicit -r win-x64. Plain Exe (normal console subsystem) for everything else, including
+         linux-x64's ELF output, which has no subsystem header to set regardless but keeps the
+         property semantically correct. See tasks/wingui-console-poc.md. -->
     <OutputType Condition="'$(RuntimeIdentifier)' == 'win-x64'">WinExe</OutputType>
     <OutputType Condition="'$(RuntimeIdentifier)' != 'win-x64'">Exe</OutputType>
   </PropertyGroup>
@@ -20,9 +21,10 @@
 
   <!-- Platform-specific console handling (AllocConsole on Windows, no-op on Linux/Neutral):
        folders are opted OUT of the default glob, then opted back IN per-RID, one folder at a time.
-       Neutral covers everything that isn't win-x64/linux-x64, notably RuntimeIdentifier unset
-       entirely, which is both a plain `dotnet build`/`test`/`run` and the IDE's own design-time
-       build for IntelliSense, so neither needs a RID just to compile. -->
+       Neutral covers everything that isn't win-x64/linux-x64, genuinely RuntimeIdentifier unset
+       only happens now if src/Directory.Build.props' own win-x64 default is somehow cleared (e.g.
+       explicit `/p:RuntimeIdentifier=` with no value); the IDE's own design-time build for
+       IntelliSense still picks up that same default too, same as any other build. -->
   <ItemGroup>
     <Compile Remove="Platform/**/*.cs" />
   </ItemGroup>

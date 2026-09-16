@@ -1,15 +1,17 @@
 namespace Croicu.Desk.Tools.Service.Tests.Unit;
 
 /// <summary>
-/// Compiled in whenever the test project itself is built with no RuntimeIdentifier (the default
-/// `dotnet test` invocation -- see tests/Service/Service.Tests.csproj's Platform/-selection
-/// ItemGroups, mirroring src/Service/Service.csproj's own), which pairs with
+/// Compiled in whenever the test project itself is built with a RuntimeIdentifier other than
+/// win-x64/linux-x64 (see tests/Service/Service.Tests.csproj's Platform/-selection ItemGroups,
+/// mirroring src/Service/Service.csproj's own) -- win-x64 is tests/Directory.Build.props' own
+/// default now, so reaching this variant needs an explicit override (e.g. `DESK_TOOLS_RID` cleared
+/// or set to something else; see that file's own remarks), which pairs with
 /// <c>SingletonGuard</c>'s own Neutral variant (<c>Platform/Neutral/SingletonGuard.cs</c>) being
 /// what actually gets compiled into <c>Service.csproj</c> under that same condition -- a no-op that
 /// always "acquires" successfully, same as <c>Platform/Linux/SingletonGuard.cs</c>. These tests
 /// verify that documented no-op contract, not real cross-process exclusion (only the Windows
-/// variant has that -- see <c>Platform/Windows/SingletonGuardTests.cs</c>, which requires an
-/// explicit `dotnet test -r win-x64` to actually compile and run).
+/// variant has that -- see <c>Platform/Windows/SingletonGuardTests.cs</c>, which is what a plain
+/// `dotnet test` actually exercises now).
 /// </summary>
 [TestClass]
 public sealed class SingletonGuardTests

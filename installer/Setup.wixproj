@@ -57,9 +57,22 @@
        $(Configuration), not hardcoded to Release, so a plain `dotnet build installer/Setup.wixproj`
        (defaults to Debug, matching the inner dev loop) bundles a Debug payload into
        release\Debug\Service.msi, while CD's own `-c Release` invocation bundles a Release payload
-       into release\Release\Service.msi, same as before. -->
+       into release\Release\Service.msi, same as before.
+
+       Also publishes Hello.csproj and Desk.csproj into the same $(AppPublishDir) (see issue #29):
+       without Hello, src/Hello/Hello.csproj's own build-time-generated mcp-registry/hello.json
+       would reference a Hello.dll that was never actually shipped in the MSI at all; none of
+       Service.csproj/Hello.csproj/Desk.csproj reference each other, so publishing one alone never
+       pulls the others in. All three publishing into the identical output folder is safe (matches
+       how they already share one build-time output folder too, src/Directory.Build.props'
+       BaseOutputPath): each references Base.csproj, so each publish independently produces its own
+       copy of Base.dll/Base.pdb into that shared folder, and since all three are built from the
+       exact same Configuration, each later publish's copy just harmlessly overwrites the earlier,
+       identical one. -->
   <Target Name="PublishAppForSetup" BeforeTargets="CoreCompile">
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Service\Service.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Hello\Hello.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\src\Desk\Desk.csproj&quot; -c $(Configuration) -r win-x64 --self-contained false -o &quot;$(AppPublishDir)&quot;" />
   </Target>
 
 </Project>

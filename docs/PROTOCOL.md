@@ -17,10 +17,18 @@ CLI signature and file format schemas for `desk-tools`.
 `--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
 `--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
 `--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
-it). `src/Desk` additionally requires exactly one bare subcommand, `ping` or `shutdown` (a verb --
-what Desk should do -- rather than a `--`-prefixed flag, since the two are mutually exclusive, not
-independent options); missing it, giving both, or any other unrecognized argument exits 2, same as
-`src/Service`. See the Echo protocol section below for what each subcommand sends.
+it). `src/Desk` additionally requires exactly one bare subcommand, `ping`, `shutdown`, or
+`mcp <name>` (a verb -- what Desk should do -- rather than a `--`-prefixed flag, since they're
+mutually exclusive, not independent options); missing one, giving more than one, `mcp` with no name
+argument, or any other unrecognized argument exits 2, same as `src/Service`. See the Echo protocol
+section below for what each subcommand sends.
+
+`desk mcp <name>` is itself a stdio MCP proxy (see
+[issue #33](https://github.com/croicu/desk-tools/issues/33)): usable as a real `.mcp.json`
+`command` entry pointing at Desk instead of a tool's own executable directly. Once launched, its
+own stdout carries only the launched tool's traffic (Desk installs a silent logging sink before
+this starts, the same discipline `src/Hello`'s own `Program.Start` documents for itself) -- see the
+Echo protocol section below for the full exchange.
 
 ## MCP (`src/Hello`)
 
@@ -63,15 +71,45 @@ C#, and exposing Service's shutdown rather than Hello's own tools -- registered 
 
 ## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
 
-Plain newline-delimited text, not JSON-RPC -- a stepping stone ahead of the real request/response
-framing referenced in `docs/ARCHITECTURE.md`'s `Host` entry ([issue #5](https://github.com/croicu/desk-tools/issues/5)).
-A client connects to `Host`'s loopback listener (port from `settings.json`'s `port`, see below),
-writes exactly one line, and reads exactly one line back: `Host` echoes whatever it read verbatim,
-then closes the connection. A client that sends nothing before closing its own end gets no reply,
-just a closed connection. `src/Desk` is this protocol's main client, with two subcommands (see the
-CLI section above):
+JSON-RPC 2.0, newline-delimited, one request per TCP connection (see
+[issue #31](https://github.com/croicu/desk-tools/issues/31) -- this section's name predates the
+switch away from the original plain-text echo protocol it replaced; kept for continuity with
+`docs/ARCHITECTURE.md`'s own references). A client connects to `Host`'s loopback listener (port
+from `settings.json`'s `port`, see below), writes exactly one JSON-RPC request line, and reads
+exactly one JSON-RPC response line back, then the connection closes. A request with no `id` is a
+notification per the JSON-RPC spec: consumed, no response ever sent, regardless of method. A client
+that sends nothing before closing its own end likewise gets no reply, just a closed connection.
+Same error codes/envelope shapes as `src/Hello`'s own hand-rolled dispatch (see the MCP section
+above): malformed JSON is `-32700` (Parse error, `id: null`); a request missing `method` is
+`-32600` (Invalid Request); an unrecognized method is `-32601` (Method not found); missing/malformed
+`params` on a method that needs them is `-32602` (Invalid params); an unexpected exception while
+handling a request is `-32603` (Internal error).
 
-- `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits. If `Host` isn't
+Three methods today:
+
+- `ping` -- no params, result `"pong"`. A liveness/reachability check.
+- `shutdown` -- no params, result `"ok"`. Asks `Host` to shut down gracefully once it has replied
+  ([issue #22](https://github.com/croicu/desk-tools/issues/22)) -- still replies first, so the
+  client gets a definitive acknowledgment before the listener actually stops. Shares `Host`'s
+  existing idle-timeout shutdown path rather than a separate mechanism, so the teardown itself
+  (stop listening, join the accept thread) is identical either way.
+- `mcp` -- params `{"name": "<mcp-registry name>", "processId": <caller's own PID>}`. Launches the
+  named tool (see the MCP tool registry entry below, and `docs/ARCHITECTURE.md`'s `McpToolLauncher`
+  entry) and hands the caller direct access to its stdin/stdout by duplicating the underlying pipe
+  handles directly into the caller's own process via Win32 `DuplicateHandle`
+  ([issue #32](https://github.com/croicu/desk-tools/issues/32)) -- `Host` steps out of the exchange
+  entirely once it replies, rather than relaying the tool's traffic itself for its whole lifetime.
+  Result `{"stdin": "<decimal handle value>", "stdout": "<decimal handle value>"}` -- text, not a
+  JSON number, since a Win32 `HANDLE` is a pointer (8 bytes on x64) and a JSON number can't reliably
+  round-trip that precision. Windows-only (the mechanism itself is); `-32603` (Internal error) on
+  any other platform, on a missing/malformed registry entry, or on the duplication itself failing.
+  Trusts the caller-supplied `processId` as-is -- no verification against the real TCP connection's
+  owning process (a known, deliberate simplification; the loopback listener is local-machine-only
+  exposure either way).
+
+`src/Desk` is this protocol's main client, with three subcommands (see the CLI section above):
+
+- `desk ping` -- sends a `ping` request, prints the result (`pong`), and exits. If `Host` isn't
   reachable, auto-starts it via the installed scheduled task (`schtasks /run /tn "Desk Tools
   Service"`, see `docs/ARCHITECTURE.md`'s `ServiceLauncher` entry and
   [issue #27](https://github.com/croicu/desk-tools/issues/27)) -- deliberately *not* a plain child
@@ -80,23 +118,21 @@ CLI section above):
   installed via the MSI (the scheduled task must already be registered); fails with a clear error
   otherwise, or if it never becomes reachable within the startup wait.
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
-  running isn't an error worth auto-starting for). Sends the reserved line `shutdown`
-  (`Host.ShutdownCommand`), asking `Host` to
-  shut down gracefully once it has replied ([issue #22](https://github.com/croicu/desk-tools/issues/22)).
-  Still echoed back first like any other line, so Desk gets a definitive acknowledgment before the
-  listener actually stops; Desk itself just prints a fixed confirmation rather than the raw echoed
-  text. Shares `Host`'s existing idle-timeout shutdown path rather than a separate mechanism, so the
-  teardown itself (stop listening, join the accept thread) is identical either way. Known
-  limitation of this still-plain-text protocol: an ordinary `ping` whose payload happened to equal
-  the literal string `shutdown` would also trigger this -- acceptable today since neither of this
-  protocol's clients ever sends arbitrary/user-supplied text, worth revisiting once real request
-  framing lands.
+  running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
+  prints a fixed confirmation rather than the raw JSON-RPC result.
+- `desk mcp <name>` -- sends an `mcp` request (same auto-start-on-failure retry as `ping`), opens
+  the two duplicated handles the result returns, then bridges this process's own stdin/stdout to
+  them (`src/Desk/McpProxy.cs`, see `docs/ARCHITECTURE.md`'s own entry) until its own stdin reaches
+  EOF -- at which point it closes its copy of the tool's stdin (so the tool sees EOF too and exits
+  its own read loop gracefully) and exits itself. Makes `desk mcp <name>` usable as a real
+  `.mcp.json` `command` entry pointing at Desk instead of the tool's own executable directly --
+  Desk never parses the relayed traffic, purely a line relay.
 
 `scripts/shutdown_service.py` is a second, standalone client -- plain-stdlib Python (`socket`/
 `json`/`argparse`, no dependencies), for shutting `Host` down without the .NET toolchain involved.
 Resolves the port the same way (`settings.json`/`settings.local.json`'s `port`, local overriding,
-default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` sentinel is
-kept in sync by hand with `Host.ShutdownCommand`, same as `src/Desk`'s.
+default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` method name is
+kept in sync by hand with `Host.ShutdownMethod`, same as `src/Desk`'s.
 
 ## File formats
 
@@ -143,3 +179,45 @@ module nor working-directory tier has a file, `Load()` falls back to restrictive
 - `port` (number, default `51823`) -- loopback TCP port `src/Service`'s `Host` listens on and
   `src/Desk` connects to (see the Echo protocol section above). Both processes read this from the
   same shared settings.json, with no direct dependency between them beyond that.
+
+### MCP tool registry -- `mcp-registry/<name>.json`
+
+Build-time-generated, not hand-written or checked in (see [issue #29](https://github.com/croicu/desk-tools/issues/29)
+and `docs/ARCHITECTURE.md`'s `Directory.Build.targets` entry) -- one small file per MCP tool,
+written to `$(OutDir)mcp-registry/` after a plain `dotnet build` (the same shared output folder
+settings.json itself lands in) or `$(PublishDir)mcp-registry/` after `dotnet publish` (including the
+MSI's own publish step, `installer/Setup.wixproj`, which now publishes `Hello.csproj` alongside
+`Service.csproj`/`Desk.csproj` specifically so this ends up shipped there too), by any project that
+opts in via its own `<McpToolName>` MSBuild property. Each file is a full `.mcp.json`-shaped server
+fragment (`type`/`command`/`args`/`env`, matching that file's own `"hello"` entry exactly) plus a
+`name` field `.mcp.json` itself doesn't need (there, the tool's name is the surrounding object's own
+key; this registry is one file per tool, so there's no such key to borrow one from):
+
+```json
+{"name": "hello", "type": "stdio", "command": "dotnet", "args": ["Hello.dll"], "env": {}}
+```
+
+- `name` (string) -- the tool's registry name, from the opted-in project's own `<McpToolName>`
+  (e.g. `"hello"`).
+- `type` (string) -- MCP transport, always `"stdio"` for now (every tool this registry currently
+  describes uses it).
+- `command` (string) -- always `"dotnet"` for an entry this MSBuild-based generation produces
+  (every project it can run against is necessarily a .NET one). A future non-.NET (e.g. Python)
+  tool's own entry would set this to something else (e.g. `"python"`) instead -- deliberately not a
+  separate `"type": "dotnet"`-style field, since `.mcp.json`'s own `type` already means transport, a
+  same-named field with a different meaning would collide.
+- `args` (array of strings) -- the built file's bare name (`$(TargetFileName)`, e.g. `"Hello.dll"`),
+  resolvable relative to the registry file's own directory, not a full or repo-relative path.
+- `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
+
+`src/Hello` is the one tool registered so far; a future non-.NET (e.g. Python) tool could add its
+own entry to the same folder by convention, without needing any of this MSBuild machinery itself.
+
+`src/Service/McpToolLauncher.cs` (see [issue #30](https://github.com/croicu/desk-tools/issues/30)
+and `docs/ARCHITECTURE.md`'s own entry) is the first consumer: given a registry name, it reads and
+parses that tool's fragment and spawns it as a child process with redirected stdin/stdout via
+`src/Service/ToolLauncher.cs`. `Host`'s own `mcp` JSON-RPC method (see the Echo protocol section
+above and [issue #32](https://github.com/croicu/desk-tools/issues/32)) is the actual external
+trigger: it calls `McpToolLauncher.Launch`, then hands the caller direct access to the launched
+tool's stdio via `DuplicateHandle` -- still no `.mcp.json` changes and no `src/Desk` consumer of
+this yet, that remains a separate future step.
