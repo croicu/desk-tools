@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using Croicu.Desk.Tools.Mocks;
 
 namespace Croicu.Desk.Tools.Service.Tests.Unit;
@@ -11,12 +12,17 @@ namespace Croicu.Desk.Tools.Service.Tests.Unit;
 /// each other (and with ProgramTests.Main_RunsClean, which exercises the default
 /// ISettingsProvider.Port via Program.Run). WaitForIdleShutdown() blocks the calling thread until
 /// the idle timer fires, so every call here runs on its own Task with a bounded Wait() -- a real
-/// regression (timer never firing) would otherwise hang the test run instead of failing it.
+/// regression (timer never firing) would otherwise hang the test run instead of failing it. See
+/// [issue #31](https://github.com/croicu/desk-tools/issues/31) for the switch to JSON-RPC.
 /// </summary>
 [TestClass]
 public sealed class HostTests
 {
     private static readonly TimeSpan BoundedWait = TimeSpan.FromSeconds(10);
+
+    // No BOM: a real client (src/Desk's Client) doesn't send one either -- see
+    // Host.WriteEncoding's own remarks for why that matters.
+    private static readonly UTF8Encoding WriteEncoding = new(encoderShouldEmitUTF8Identifier: false);
 
     [TestMethod]
     public void WaitForIdleShutdown_NoActivity_ReturnsAfterIdleTimeout()
@@ -46,7 +52,7 @@ public sealed class HostTests
     }
 
     [TestMethod]
-    public void AcceptLoop_EchoesOneLineThenCloses()
+    public void AcceptLoop_Ping_ReturnsPongThenCloses()
     {
         var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
         host.Start();
@@ -55,14 +61,15 @@ public sealed class HostTests
         {
             client.Connect(IPAddress.Loopback, host.Port);
 
-            // No BOM: a real client (src/Desk's Client) doesn't send one either -- see
-            // Host.WriteEncoding's own remarks for why that matters.
-            using var writer = new StreamWriter(client.GetStream(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
             using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
 
-            writer.WriteLine("echo request");
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.PingMethod}}"}""");
             var reply = reader.ReadLine();
-            Assert.AreEqual("echo request", reply);
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual("pong", doc.RootElement.GetProperty("result").GetString());
 
             // The server closes right after replying -- a further blocking read observes that as
             // EOF (0 bytes) rather than throwing.
@@ -76,7 +83,7 @@ public sealed class HostTests
     }
 
     [TestMethod]
-    public void AcceptLoop_ShutdownCommand_TriggersShutdownWithoutWaitingForIdleTimeout()
+    public void AcceptLoop_Shutdown_TriggersShutdownWithoutWaitingForIdleTimeout()
     {
         // A long idle timeout: if shutdown here actually waited on the idle timer instead of being
         // triggered directly by the request, the bounded wait below would time out and fail.
@@ -87,19 +94,96 @@ public sealed class HostTests
         {
             client.Connect(IPAddress.Loopback, host.Port);
 
-            using var writer = new StreamWriter(client.GetStream(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
             using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
 
-            writer.WriteLine(Host.ShutdownCommand);
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.ShutdownMethod}}"}""");
 
-            // Still echoed back first, same as any other line -- the client gets a definitive
+            // Still replied to first, same as any other request -- the client gets a definitive
             // acknowledgment before the listener actually stops.
             var reply = reader.ReadLine();
-            Assert.AreEqual(Host.ShutdownCommand, reply);
+            Assert.IsNotNull(reply);
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual("ok", doc.RootElement.GetProperty("result").GetString());
         }
 
         var shutdownTask = Task.Run(host.WaitForIdleShutdown);
         Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down promptly after a shutdown request.");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_UnknownMethod_ReturnsMethodNotFoundError()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine("""{"jsonrpc": "2.0", "id": 1, "method": "no-such-method"}""");
+            var reply = reader.ReadLine();
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual(-32601, doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_MalformedJson_ReturnsParseError()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine("not valid json");
+            var reply = reader.ReadLine();
+            Assert.IsNotNull(reply);
+
+            using var doc = JsonDocument.Parse(reply);
+            Assert.AreEqual(-32700, doc.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+            Assert.AreEqual(JsonValueKind.Null, doc.RootElement.GetProperty("id").ValueKind);
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_NotificationWithNoId_ClosesWithNoReply()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
+        host.Start();
+
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "method": "{{Host.PingMethod}}"}""");
+
+            // No id -- a notification, per JSON-RPC. Consumed, no reply, regardless of method.
+            var buffer = new byte[1];
+            var bytesRead = client.GetStream().Read(buffer, 0, buffer.Length);
+            Assert.AreEqual(0, bytesRead);
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
     }
 
     [TestMethod]

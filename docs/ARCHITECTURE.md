@@ -87,17 +87,20 @@ for whatever it needs since both are already resolved by the time `Context.Start
 
 `src/Service/Host.cs` (chunk 0 of the resident-process skeleton -- see
 [issue #5](https://github.com/croicu/desk-tools/issues/5)): the resident process's bare hosting
-mechanics, ahead of real JSON-RPC framing/dispatch. Owns a `TcpListener` on
-`ISettingsProvider.Port` (shared settings.json, default `51823` -- not yet the real `say_hello`
-port), an accept loop on a dedicated background thread that dispatches each connection to the
-thread pool via a named handler (reads at most one newline-delimited line and writes it straight
-back, then closes -- plain-text echo, still ahead of real JSON-RPC framing/dispatch), and a
+mechanics. Owns a `TcpListener` on `ISettingsProvider.Port` (shared settings.json, default `51823`
+-- not yet the real `say_hello` port), an accept loop on a dedicated background thread that
+dispatches each connection to the thread pool via a named handler (reads at most one
+newline-delimited JSON-RPC 2.0 request line, dispatches it, and writes at most one JSON-RPC
+response line back, then closes -- see [issue #31](https://github.com/croicu/desk-tools/issues/31)
+for the switch away from this class's earlier plain-text echo protocol; mirrors
+`src/Hello/Program.cs`'s own hand-rolled dispatch style, same error codes/envelope shapes, just one
+request per TCP connection instead of a persistent stdio read loop), and a
 `System.Threading.Timer`-driven idle check that exits the process once no connection has been
 accepted for `Settings.IdleTimeout` and none is currently in flight. A client can also trigger
-shutdown directly by sending `Host.ShutdownCommand` instead of an ordinary line -- still echoed
-back first, then the exact same `_shutdownSignal` the idle-timeout check already sets gets set from
-the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join the
-accept thread) runs identically regardless of which of the two triggered it (see
+shutdown directly with a `Host.ShutdownMethod` request instead of `Host.PingMethod` -- still
+replied to first, then the exact same `_shutdownSignal` the idle-timeout check already sets gets
+set from the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join
+the accept thread) runs identically regardless of which of the two triggered it (see
 [issue #22](https://github.com/croicu/desk-tools/issues/22) -- deliberately one shutdown path, not
 two). `Program.cs`'s `Run()` first acquires `SingletonGuard` (`src/Service/Platform/`) -- a
 named `Mutex` (`Local\Desk Tools Service`) guarding against a second `Host` racing for the same
@@ -169,21 +172,22 @@ CLI flag of its own, `--log <dir>`
 
 `src/Desk/Program.cs`: a plain console client for `src/Service`'s `Host` -- connects to its
 loopback listener on `ISettingsProvider.Port` (the same shared settings.json `Host` itself reads,
-so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one
-newline-delimited line, waits for the same line echoed back, and exits. Requires exactly one bare
-subcommand (`DeskCommand`, a verb -- not a `--`-prefixed flag, since the two are mutually
-exclusive): `ping` sends the fixed line `ping` and prints whatever comes back via `Logger.Print`;
-`shutdown` sends `Host.ShutdownCommand` (kept in sync by hand as its own literal, since Desk
-deliberately has no `ProjectReference` on `Service.csproj` to reference the real constant) and
-prints a fixed confirmation instead of the raw echoed text. `Start` forwards the parsed command into
+so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one JSON-RPC
+request line, waits for the response, and exits. Requires exactly one bare subcommand
+(`DeskCommand`, a verb -- not a `--`-prefixed flag, since the two are mutually exclusive): `ping`
+sends a `ping` request and prints its result (`"pong"`) via `Logger.Print`; `shutdown` sends a
+`Host.ShutdownMethod` request (kept in sync by hand as its own literal, since Desk deliberately has
+no `ProjectReference` on `Service.csproj` to reference the real constant) and prints a fixed
+confirmation instead of the raw JSON-RPC result. `Start` forwards the parsed command into
 `Run` via a trivial forwarding lambda (`() => Run(arguments.Command)`, same pattern Hello's own
 `Start` already uses for its `input` parameter), since `Context.Start`'s `run` delegate is a plain
 `Func<int>`. The actual connect/send/read exchange lives in `Client` (`src/Desk/Client.cs`),
 constructed with an optional port override (same pattern as `Host`'s own constructor) so a test can
 point it at a test-local peer instead of the real settings-resolved port -- `Client` itself has no
-notion of "ping" vs "shutdown", it only ever sends one line and returns what comes back; the
-command's meaning is entirely `Host`'s to interpret, based on content. A closed connection or
-failure to connect raises a plain `AppError`, surfaced through the same `AppError`-to-exit-code-1
+notion of "ping" vs "shutdown", it only ever sends a method name with no params and returns the
+result; the method's meaning is entirely `Host`'s to interpret. A closed connection, a JSON-RPC
+error response, or a failure to connect all raise a plain `AppError`, surfaced through the same
+`AppError`-to-exit-code-1
 handling every other app here already gets from `Context.Start`. `shutdown` stays fail-fast there,
 no retry, no auto-start (shutting down something that isn't running isn't worth auto-starting for);
 `ping` instead falls back to `ServiceLauncher.StartAndWaitUntilReachable`
@@ -208,11 +212,13 @@ and back down); this always goes through the scheduled task instead, and never n
 `Service.dll`'s path itself at all.
 
 `scripts/shutdown_service.py`: a standalone, plain-stdlib Python script that sends `Host` the same
-`shutdown` request `desk shutdown` does, for shutting the resident process down without the .NET
-toolchain involved. Outside `src/`/`tests/` entirely -- no build step, no project file, just a
-script -- so it necessarily duplicates a few things `src/Desk` already has rather than sharing them
-across languages: its own copy of the `"shutdown"` sentinel literal (kept in sync by hand with
-`Host.ShutdownCommand`, same as `src/Desk`'s own copy), and its own settings.json-reading logic
+JSON-RPC `shutdown` request `desk shutdown` does, for shutting the resident process down without
+the .NET toolchain involved. Outside `src/`/`tests/` entirely -- no build step, no project file,
+just a script -- so it necessarily duplicates a few things `src/Desk` already has rather than
+sharing them across languages: its own copy of the `"shutdown"` method-name literal (kept in sync
+by hand with `Host.ShutdownMethod`, same as `src/Desk`'s own copy), its own minimal JSON-RPC
+request/response envelope handling (no error-code-specific behavior, just success-vs-error), and
+its own settings.json-reading logic
 (`port`, local overriding, default `51823` -- a deliberately simplified read of just the two
 repo-root files, not `Settings.cs`'s full module-tier/working-directory-tier merge, since that
 distinction doesn't apply to a script with a fixed location).
@@ -271,8 +277,9 @@ production behavior, the same pattern as `Host`'s own `port` constructor paramet
 registry's own directory as the working directory (matching `args`' paths, which are relative to
 it, not to whichever process happens to be calling this). `AppError` on a missing registry file,
 malformed JSON, or a fragment missing/misshaping any of `command`/`args`/`env`. Still just the
-process+pipes primitive (issue #30's own deliberate scope) -- no wire-protocol/echo-command trigger
-yet, no actual MCP JSON-RPC proxying through an external client connection; verified end-to-end by
+process+pipes primitive (issue #30's own deliberate scope) -- not yet wired to `Host`'s own
+JSON-RPC dispatch (see [issue #31](https://github.com/croicu/desk-tools/issues/31)), no actual MCP
+JSON-RPC proxying through an external client connection; verified end-to-end by
 `tests/Service/Integration/HelloTests.cs`, which launches the real, build-generated `hello` registry
 entry, sends a real `initialize` request over the redirected stdin, and reads back a real MCP
 response over the redirected stdout -- confirming the pipes carry working stdio traffic, not just
@@ -285,10 +292,11 @@ that a process object exists.
 `Program.cs` loads `Settings` (see `docs/PROTOCOL.md`'s settings.json discovery order) before
 constructing `Host`, so every knob `Host` reads (`IdleTimeout`, `Port`) is already resolved by the
 time it starts. At runtime, `Host` reacts to a TCP connection being accepted: it's both the interim
-activity signal and the trigger to read one line and echo it back before closing. `src/Desk` is the
-other end of that exchange -- it resolves the same `Port` from its own `Settings.Load()` call (same
-shared settings.json, no direct dependency between the two processes beyond that shared file), then
-connects, sends, and reads back exactly what `Host` echoes.
+activity signal and the trigger to read one JSON-RPC request line and dispatch it before closing.
+`src/Desk` is the other end of that exchange -- it resolves the same `Port` from its own
+`Settings.Load()` call (same shared settings.json, no direct dependency between the two processes
+beyond that shared file), then connects, sends a request, and reads back `Host`'s JSON-RPC
+response.
 
 ## Contracts
 

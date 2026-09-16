@@ -27,12 +27,11 @@ public sealed record CliArguments(DeskCommand Command, string? LogDir = null);
 
 public static class Program
 {
-    private const string PingMessage = "ping";
-
-    // Must match Host.ShutdownCommand -- see that constant's own remarks on why this is a
-    // hand-kept-in-sync literal rather than a shared reference (Desk deliberately has no
-    // ProjectReference on Service.csproj).
-    private const string ShutdownCommand = "shutdown";
+    // Must match Host.PingMethod/Host.ShutdownMethod -- see those constants' own remarks on why
+    // these are hand-kept-in-sync literals rather than a shared reference (Desk deliberately has
+    // no ProjectReference on Service.csproj).
+    private const string PingMethod = "ping";
+    private const string ShutdownMethod = "shutdown";
 
     public static int Main(string[] args) => Start(args);
 
@@ -61,7 +60,7 @@ public static class Program
                 Logger.Print(PingWithAutoStart(client));
                 break;
             case DeskCommand.Shutdown:
-                client.SendEcho(ShutdownCommand);
+                client.Send(ShutdownMethod);
                 Logger.Print("Shutdown requested.");
                 break;
             default:
@@ -74,7 +73,7 @@ public static class Program
     /// <summary>
     /// Tries a normal ping first; only on failure does it fall back to starting the service and
     /// retrying, rather than always paying the auto-start machinery's cost. The retry after a
-    /// successful auto-start is a plain, un-retried <see cref="Client.SendEcho"/> call -- if the
+    /// successful auto-start is a plain, un-retried <see cref="Client.Send"/> call -- if the
     /// service somehow stops being reachable in the brief window between
     /// <see cref="ServiceLauncher.StartAndWaitUntilReachable"/> confirming it and this final call,
     /// that's a genuine failure worth surfacing as-is, not silently retried again.
@@ -83,13 +82,13 @@ public static class Program
     {
         try
         {
-            return client.SendEcho(PingMessage);
+            return client.Send(PingMethod);
         }
         catch (AppError)
         {
             Logger.Info("desk: service not reachable; attempting to start it.");
             ServiceLauncher.StartAndWaitUntilReachable(() => TryPing(client));
-            return client.SendEcho(PingMessage);
+            return client.Send(PingMethod);
         }
     }
 
@@ -97,7 +96,7 @@ public static class Program
     {
         try
         {
-            client.SendEcho(PingMessage);
+            client.Send(PingMethod);
             return true;
         }
         catch (AppError)

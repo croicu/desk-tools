@@ -2,11 +2,12 @@
 """Shuts down the Desk Tools Service resident process gracefully.
 
 Connects to Host's loopback TCP listener (see docs/PROTOCOL.md's Echo protocol section) and sends
-the reserved "shutdown" line -- Host echoes it back (an acknowledgment) then shuts itself down via
-the same path its own idle timeout uses. Mirrors src/Desk's own `desk shutdown` subcommand, just as
-a standalone script with no .NET toolchain involved. The "shutdown" sentinel must match
-Host.ShutdownCommand (src/Service/Host.cs) -- kept in sync by hand, same as Desk's own copy of that
-constant, since there's no shared-across-languages way to reference it.
+a JSON-RPC 2.0 "shutdown" request -- Host replies with a result (an acknowledgment) then shuts
+itself down via the same path its own idle timeout uses. Mirrors src/Desk's own `desk shutdown`
+subcommand, just as a standalone script with no .NET toolchain involved. The "shutdown" method name
+must match Host.ShutdownMethod (src/Service/Host.cs) -- kept in sync by hand, same as Desk's own
+copy of that constant, since there's no shared-across-languages way to reference it. See
+[issue #31](https://github.com/croicu/desk-tools/issues/31) for the switch to JSON-RPC.
 """
 
 from __future__ import annotations
@@ -16,8 +17,9 @@ import json
 import socket
 import sys
 from pathlib import Path
+from typing import Any
 
-SHUTDOWN_COMMAND = "shutdown"
+SHUTDOWN_METHOD = "shutdown"
 DEFAULT_PORT = 51823
 
 
@@ -58,10 +60,12 @@ def resolve_port(repo_root: Path) -> int:
 
 
 def request_shutdown(port: int, timeout: float = 5.0) -> str:
-    """Connects, sends the shutdown line, and returns the line Host echoed back -- raises OSError
-    on any connection failure, same fail-fast, no-retry behavior as Desk's own Client.SendEcho."""
+    """Connects, sends a JSON-RPC "shutdown" request, and returns its string result ("ok" on
+    success) -- raises OSError on any connection failure (same fail-fast, no-retry behavior as
+    Desk's own Client.Send), or ValueError if the reply is malformed or a JSON-RPC error."""
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
-        sock.sendall(f"{SHUTDOWN_COMMAND}\n".encode("utf-8"))
+        request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": SHUTDOWN_METHOD}) + "\n"
+        sock.sendall(request.encode("utf-8"))
 
         reply = b""
         while True:
@@ -70,7 +74,23 @@ def request_shutdown(port: int, timeout: float = 5.0) -> str:
                 break
             reply += chunk
 
-        return reply.decode("utf-8").strip()
+        return _parse_result(reply.decode("utf-8").strip())
+
+
+def _parse_result(reply_line: str) -> str:
+    try:
+        envelope: dict[str, Any] = json.loads(reply_line)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"reply was not valid JSON-RPC: {error}") from error
+
+    if "error" in envelope:
+        error_detail = envelope["error"]
+        raise ValueError(f"request failed: {error_detail.get('message', '(no message)')} (code {error_detail.get('code', 0)})")
+
+    if "result" not in envelope:
+        raise ValueError(f"reply had neither 'result' nor 'error': {reply_line}")
+
+    return envelope["result"]
 
 
 def main() -> int:
@@ -83,13 +103,12 @@ def main() -> int:
 
     print(f"shutdown: connecting to 127.0.0.1:{port}.")
     try:
-        reply = request_shutdown(port)
+        request_shutdown(port)
     except OSError as error:
         print(f"shutdown: error: could not connect to the service on port {port}: {error}", file=sys.stderr)
         return 1
-
-    if reply != SHUTDOWN_COMMAND:
-        print(f"shutdown: error: unexpected reply from service: {reply!r}", file=sys.stderr)
+    except ValueError as error:
+        print(f"shutdown: error: {error}", file=sys.stderr)
         return 1
 
     print("Shutdown requested.")

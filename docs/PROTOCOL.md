@@ -63,15 +63,31 @@ C#, and exposing Service's shutdown rather than Hello's own tools -- registered 
 
 ## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
 
-Plain newline-delimited text, not JSON-RPC -- a stepping stone ahead of the real request/response
-framing referenced in `docs/ARCHITECTURE.md`'s `Host` entry ([issue #5](https://github.com/croicu/desk-tools/issues/5)).
-A client connects to `Host`'s loopback listener (port from `settings.json`'s `port`, see below),
-writes exactly one line, and reads exactly one line back: `Host` echoes whatever it read verbatim,
-then closes the connection. A client that sends nothing before closing its own end gets no reply,
-just a closed connection. `src/Desk` is this protocol's main client, with two subcommands (see the
-CLI section above):
+JSON-RPC 2.0, newline-delimited, one request per TCP connection (see
+[issue #31](https://github.com/croicu/desk-tools/issues/31) -- this section's name predates the
+switch away from the original plain-text echo protocol it replaced; kept for continuity with
+`docs/ARCHITECTURE.md`'s own references). A client connects to `Host`'s loopback listener (port
+from `settings.json`'s `port`, see below), writes exactly one JSON-RPC request line, and reads
+exactly one JSON-RPC response line back, then the connection closes. A request with no `id` is a
+notification per the JSON-RPC spec: consumed, no response ever sent, regardless of method. A client
+that sends nothing before closing its own end likewise gets no reply, just a closed connection.
+Same error codes/envelope shapes as `src/Hello`'s own hand-rolled dispatch (see the MCP section
+above): malformed JSON is `-32700` (Parse error, `id: null`); a request missing `method` is
+`-32600` (Invalid Request); an unrecognized method is `-32601` (Method not found); an unexpected
+exception while handling a request is `-32603` (Internal error).
 
-- `desk ping` -- sends the fixed line `ping`, prints whatever comes back, and exits. If `Host` isn't
+Two methods today, both no-params:
+
+- `ping` -- result `"pong"`. A liveness/reachability check.
+- `shutdown` -- result `"ok"`. Asks `Host` to shut down gracefully once it has replied
+  ([issue #22](https://github.com/croicu/desk-tools/issues/22)) -- still replies first, so the
+  client gets a definitive acknowledgment before the listener actually stops. Shares `Host`'s
+  existing idle-timeout shutdown path rather than a separate mechanism, so the teardown itself
+  (stop listening, join the accept thread) is identical either way.
+
+`src/Desk` is this protocol's main client, with two subcommands (see the CLI section above):
+
+- `desk ping` -- sends a `ping` request, prints the result (`pong`), and exits. If `Host` isn't
   reachable, auto-starts it via the installed scheduled task (`schtasks /run /tn "Desk Tools
   Service"`, see `docs/ARCHITECTURE.md`'s `ServiceLauncher` entry and
   [issue #27](https://github.com/croicu/desk-tools/issues/27)) -- deliberately *not* a plain child
@@ -80,23 +96,14 @@ CLI section above):
   installed via the MSI (the scheduled task must already be registered); fails with a clear error
   otherwise, or if it never becomes reachable within the startup wait.
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
-  running isn't an error worth auto-starting for). Sends the reserved line `shutdown`
-  (`Host.ShutdownCommand`), asking `Host` to
-  shut down gracefully once it has replied ([issue #22](https://github.com/croicu/desk-tools/issues/22)).
-  Still echoed back first like any other line, so Desk gets a definitive acknowledgment before the
-  listener actually stops; Desk itself just prints a fixed confirmation rather than the raw echoed
-  text. Shares `Host`'s existing idle-timeout shutdown path rather than a separate mechanism, so the
-  teardown itself (stop listening, join the accept thread) is identical either way. Known
-  limitation of this still-plain-text protocol: an ordinary `ping` whose payload happened to equal
-  the literal string `shutdown` would also trigger this -- acceptable today since neither of this
-  protocol's clients ever sends arbitrary/user-supplied text, worth revisiting once real request
-  framing lands.
+  running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
+  prints a fixed confirmation rather than the raw JSON-RPC result.
 
 `scripts/shutdown_service.py` is a second, standalone client -- plain-stdlib Python (`socket`/
 `json`/`argparse`, no dependencies), for shutting `Host` down without the .NET toolchain involved.
 Resolves the port the same way (`settings.json`/`settings.local.json`'s `port`, local overriding,
-default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` sentinel is
-kept in sync by hand with `Host.ShutdownCommand`, same as `src/Desk`'s.
+default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` method name is
+kept in sync by hand with `Host.ShutdownMethod`, same as `src/Desk`'s.
 
 ## File formats
 
