@@ -48,6 +48,10 @@ internal static class ToolLauncher
             startInfo.Environment[pair.Key] = pair.Value;
         }
 
+        // Set after the registry's own env so a fragment can't override it: the tool's parent
+        // watchdog (see ParentWatchdog, issue #45) must watch Service itself.
+        startInfo.Environment[ParentWatchdog.EnvironmentVariable] = Environment.ProcessId.ToString();
+
         Process? process;
         try
         {

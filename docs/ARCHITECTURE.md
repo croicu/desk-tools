@@ -96,7 +96,11 @@ for the switch away from this class's earlier plain-text echo protocol; mirrors
 `src/Hello/Program.cs`'s own hand-rolled dispatch style, same error codes/envelope shapes, just one
 request per TCP connection instead of a persistent stdio read loop), and a
 `System.Threading.Timer`-driven idle check that exits the process once no connection has been
-accepted for `Settings.IdleTimeout` and none is currently in flight. A client can also trigger
+accepted for `Settings.IdleTimeout`, none is currently in flight, **and no handed-off MCP tool is
+still running** ([issue #45](https://github.com/croicu/desk-tools/issues/45)): after `mcp` handoff
+`Host` keeps a stdio-free watch `Process` handle per tool (`ToolProcess.OpenWatchHandle`), and the
+idle check prunes exited ones; while any is alive `Host` counts itself active (logged once at Info),
+so the TTL restarts from when the *last* tool exits. A client can also trigger
 shutdown directly with a `Host.ShutdownMethod` request instead of `Host.PingMethod` -- still
 replied to first, then the exact same `_shutdownSignal` the idle-timeout check already sets gets
 set from the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join
@@ -357,6 +361,14 @@ expectation. Deliberately has no notion of the MCP tool registry itself, kept ge
 non-registry-sourced process could reuse it. Wraps a `Process.Start` `Win32Exception` (the
 executable can't be found/launched at all) and a plain null return alike into `AppError`, matching
 this repo's usual error-surfacing convention rather than letting a raw BCL exception escape.
+
+`ToolLauncher.Launch` also sets `DESK_PARENT_PID` (Service's own PID; set after the registry's `env`
+so a fragment can't override it) in every child's environment. `src/Base/ParentWatchdog.cs`
+(`ParentWatchdog.Start`, called early by Hello; the Python tools carry a small inline copy, since
+`scripts/` are intentionally self-contained) waits on that PID from a background thread and exits
+the tool once it's gone -- the reaping path for a forced `shutdown` or a Service crash, where
+`Host`'s own wait-for-children can't help ([issue #45](https://github.com/croicu/desk-tools/issues/45)).
+A tool launched by anything other than Service has no variable set and gets no watchdog.
 
 `src/Service/McpToolLauncher.cs`: the registry-aware layer on top of `ToolLauncher` -- given a tool's
 registry name, resolves `mcp-registry/<name>.json` from `AppContext.BaseDirectory` (Service's own

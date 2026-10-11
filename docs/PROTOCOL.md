@@ -92,7 +92,9 @@ Three methods today:
   ([issue #22](https://github.com/croicu/desk-tools/issues/22)) -- still replies first, so the
   client gets a definitive acknowledgment before the listener actually stops. Shares `Host`'s
   existing idle-timeout shutdown path rather than a separate mechanism, so the teardown itself
-  (stop listening, join the accept thread) is identical either way.
+  (stop listening, join the accept thread) is identical either way. Exits immediately even if
+  launched MCP tools are still running -- those exit on their own once they notice Service is gone
+  (`DESK_PARENT_PID` watchdog, see `docs/ARCHITECTURE.md`).
 - `mcp` -- params `{"name": "<mcp-registry name>", "processId": <caller's own PID>}`. Launches the
   named tool (see the MCP tool registry entry below, and `docs/ARCHITECTURE.md`'s `McpToolLauncher`
   entry) and hands the caller direct access to its stdin/stdout by duplicating the underlying pipe
@@ -172,7 +174,10 @@ module nor working-directory tier has a file, `Load()` falls back to restrictive
 - `idleTimeout` (number, seconds, default `600`) -- how long the resident process (`Host`, see
   `docs/ARCHITECTURE.md`) may go without accepting a connection before it exits. Interim activity
   signal only (accept == activity, for now) -- see
-  [issue #5](https://github.com/croicu/desk-tools/issues/5).
+  [issue #5](https://github.com/croicu/desk-tools/issues/5). The clock only runs while no MCP tool
+  launched via `mcp` is still alive; it restarts when the last one exits
+  ([issue #45](https://github.com/croicu/desk-tools/issues/45)). An explicit `shutdown` request
+  ignores this and exits immediately.
 - `logDir` (string, directory, default unset -- no file logging) -- installs a `FileLog` sink
   writing a timestamped log file into this directory; overridable per-invocation by `--log <dir>`
   (see the CLI section above). See `docs/ARCHITECTURE.md`'s `FileLog` entry.
@@ -220,7 +225,7 @@ this registry is one file per tool, so there's no such key to borrow one from):
   Python-specific path-resolution logic either way, since "resolve relative to the registry's own
   directory" already covers a subfolder path like any other relative path (see that project's own
   remarks).
-- `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet.
+- `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet. (Service additionally sets `DESK_PARENT_PID` itself at launch, not via the registry -- see `docs/ARCHITECTURE.md`.)
 
 `src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools
 registered so far -- both real MSBuild machinery in the end, just two different opt-in mechanisms

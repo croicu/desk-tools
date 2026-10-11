@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -272,6 +273,47 @@ public sealed class HostTests
         var dir = Path.Combine(Path.GetTempPath(), $"host-mcp-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    [TestMethod]
+    public void WaitForIdleShutdown_LiveChildTracked_DoesNotExitAfterIdleTimeout()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
+        host.Start();
+        // This test process never exits during the test, so it stands in for a still-running tool.
+        host.TrackChild("fake", Process.GetCurrentProcess());
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+
+        // Idle timeout is 1s and the idle check runs every 2s -- well past one full cycle.
+        Assert.IsFalse(shutdownTask.Wait(TimeSpan.FromSeconds(6)), "Host shut down while a tracked child was still alive.");
+
+        // Release the blocked wait so the test doesn't leak its listener/threads.
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.ShutdownMethod}}"}""");
+            Assert.IsNotNull(reader.ReadLine());
+        }
+
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Explicit shutdown must not wait for children.");
+    }
+
+    [TestMethod]
+    public void WaitForIdleShutdown_TrackedChildExits_ShutsDownAfterIdleTimeout()
+    {
+        var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
+        host.Start();
+
+        var child = Process.Start(new ProcessStartInfo("dotnet", "--version") { UseShellExecute = false, RedirectStandardOutput = true })!;
+        host.TrackChild("fake", child);
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down after its tracked child exited.");
     }
 
     [TestMethod]

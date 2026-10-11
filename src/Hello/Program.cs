@@ -79,6 +79,10 @@ public static class Program
 
         var arguments = ParseArgs(argv ?? []);
 
+        // Exit once Service (the launcher, per DESK_PARENT_PID) is gone -- no-op when run any other
+        // way, including every unit test. See ParentWatchdog / issue #45.
+        ParentWatchdog.Start();
+
         return Context.Start(new VoidConsole(), "hello", settingsPath, debugOverride: false, arguments.LogDir, () => Run(input));
     }
 
