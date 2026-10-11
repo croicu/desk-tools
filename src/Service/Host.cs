@@ -34,9 +34,9 @@ internal sealed class Host
     /// No params, result <c>"ok"</c> -- asks <see cref="Host"/> to shut down gracefully (see
     /// <see cref="HandleConnection"/>). Still replies first (same as <see cref="PingMethod"/>), so
     /// the client gets a definitive acknowledgment before the listener actually stops. Duplicated
-    /// (not shared via a project reference) as a literal in <c>src/Desk/Program.cs</c> and
-    /// <c>scripts/shutdown_service.py</c>, which deliberately have no <c>ProjectReference</c>/import
-    /// on <c>Service.csproj</c> -- keep the literals in sync by hand.
+    /// (not shared via a project reference) as a literal in <c>src/Desk/Program.cs</c>, which
+    /// deliberately has no <c>ProjectReference</c> on <c>Service.csproj</c> -- keep the literals in
+    /// sync by hand.
     /// </summary>
     internal const string ShutdownMethod = "shutdown";
 

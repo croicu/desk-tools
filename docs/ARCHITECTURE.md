@@ -244,29 +244,6 @@ assembly's own output folder (a different directory than Service's, so it walks 
 and back down); this always goes through the scheduled task instead, and never needs to resolve
 `Service.dll`'s path itself at all.
 
-`scripts/shutdown_service.py`: a standalone, plain-stdlib Python script that sends `Host` the same
-JSON-RPC `shutdown` request `desk shutdown` does, for shutting the resident process down without
-the .NET toolchain involved. Outside `src/`/`tests/` entirely -- no build step, no project file,
-just a script -- so it necessarily duplicates a few things `src/Desk` already has rather than
-sharing them across languages: its own copy of the `"shutdown"` method-name literal (kept in sync
-by hand with `Host.ShutdownMethod`, same as `src/Desk`'s own copy), its own minimal JSON-RPC
-request/response envelope handling (no error-code-specific behavior, just success-vs-error), and
-its own settings.json-reading logic
-(`port`, local overriding, default `51823` -- a deliberately simplified read of just the two
-repo-root files, not `Settings.cs`'s full module-tier/working-directory-tier merge, since that
-distinction doesn't apply to a script with a fixed location).
-
-`scripts/service_mcp_server.py`: a second, minimal, hand-rolled MCP server over stdio (see
-`docs/PROTOCOL.md`), registered in `.mcp.json` as `service` alongside `src/Hello`'s own `hello`
-entry -- same shape (no SDK, same protocol version, same error codes) but in Python rather than C#,
-exposing one tool, `shutdown`, that calls straight into `shutdown_service.py`'s own
-`find_repo_root`/`resolve_port`/`request_shutdown` via a plain sibling import (reusing that logic
-rather than a third independent copy of it). Lets an MCP client (e.g. a Claude Code session working
-in this repo) shut `Host` down as a normal tool call, the same way `src/Hello`'s own `stop` tool
-lets one gracefully stop Hello -- see the `stop-service` skill under `.claude/skills/` (mirroring
-the earlier `stop-hello` one), which calls `mcp__service__shutdown` instead of killing the process
-when a build is blocked by a locked `Service.dll`/`Base.dll`.
-
 `src/Directory.Build.targets`'s `GenerateMcpRegistryEntry` target (see `docs/PROTOCOL.md`'s MCP
 tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/29)): a first,
 deliberately small step toward CLAUDE.md's own Mission ("a service for running MCP servers... at a
@@ -289,8 +266,7 @@ handing them off the way `HandleDuplicator` does.
 
 `scripts/Scripts.csproj`/`scripts/goodbye.py`: the first non-.NET MCP registry entry -- a
 `Microsoft.Build.NoTargets` project (no C# of its own, just custom MSBuild targets) since Python
-tools live in `scripts/` (edited/checked in there, matching `shutdown_service.py`/
-`service_mcp_server.py`'s own home) rather than each getting a `src/`-style per-tool project.
+tools live in `scripts/` (edited/checked in there) rather than each getting a `src/`-style per-tool project.
 Explicitly `<Import>`s `src/Directory.Build.props` (`scripts/` isn't a descendant of `src/` or
 `tests/`, so MSBuild's own auto-import wouldn't find it) specifically to reuse its
 `BaseOutputPath`/`RuntimeIdentifier` default rather than duplicating them -- the whole point being
@@ -314,10 +290,9 @@ relative path exactly like it covers a bare one, no new path-resolution logic ne
 `link-program-files.py`'s own target-directory computation accounts for this same one-level offset
 (walks up two directories from `__file__`, not one, to land back on `$(OutDir)` itself rather than
 its own `scripts/` subfolder -- see that script's own remarks). `scripts/goodbye.py`
-itself mirrors `service_mcp_server.py`'s own hand-rolled JSON-RPC shape (no SDK, same protocol
+itself mirrors `src/Hello`'s hand-rolled JSON-RPC shape (no SDK, same protocol
 version/error codes) but fully self-contained -- one tool, `say_goodbye`, returning `"Bye from
-MCP"`, no `find_repo_root`/settings-reading logic needed since it has no Service-control behavior
-of its own. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
+MCP"`. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
 real Python process) and by `tests/Service/Integration/GoodbyeTests.cs`.
 
 `src/Base/DevRedirect.cs`: lets an *installed* `Service.exe`/`Desk.exe` under Program Files hand
