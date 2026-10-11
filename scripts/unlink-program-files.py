@@ -158,7 +158,54 @@ def handle_line(line: str) -> None:
         write_error(id_, INTERNAL_ERROR_CODE, f"Internal error: {error}")
 
 
+PARENT_PID_ENV_VAR = "DESK_PARENT_PID"
+
+
+def start_parent_watchdog() -> None:
+    """Exits this process once the process named by DESK_PARENT_PID (Service) is gone (issue #45).
+
+    Same behavior as src/Base/ParentWatchdog.cs, duplicated here since scripts are intentionally
+    self-contained. No-op when the variable is unset (tool launched by anything other than Service).
+    """
+    import threading
+
+    raw = os.environ.get(PARENT_PID_ENV_VAR)
+    if not raw or not raw.isdigit():
+        return
+    parent_pid = int(raw)
+
+    def wait_for_parent_exit() -> None:
+        if os.name == "nt":
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            synchronize = 0x00100000
+            handle = kernel32.OpenProcess(synchronize, False, parent_pid)
+            if handle:
+                kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
+                kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+                kernel32.CloseHandle(handle)
+            # No handle: the parent is already gone (or inaccessible) -- exit either way.
+        else:
+            import time
+
+            while True:
+                try:
+                    os.kill(parent_pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError:
+                    pass
+                time.sleep(1)
+        os._exit(0)
+
+    threading.Thread(target=wait_for_parent_exit, name="parent-watchdog", daemon=True).start()
+
+
 def main() -> int:
+    start_parent_watchdog()
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if line:

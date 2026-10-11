@@ -43,6 +43,23 @@ internal sealed class ToolProcess : IDisposable
     }
 
     /// <summary>
+    /// Opens a second, stdio-free <see cref="Process"/> handle to the same OS process -- for
+    /// <c>Host</c> to keep watching the tool after <see cref="DisownAfterHandoff"/> (issue #45).
+    /// Returns null if the tool has already exited. Call before <see cref="DisownAfterHandoff"/>.
+    /// </summary>
+    internal Process? OpenWatchHandle()
+    {
+        try
+        {
+            return Process.GetProcessById(_process.Id);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Closes stdin (so a well-behaved tool sees EOF and exits its own read loop, the same shutdown
     /// path a real client disconnect takes -- see docs/PROTOCOL.md's Hello entry) and waits briefly
     /// for the process to exit on its own before disposing it.

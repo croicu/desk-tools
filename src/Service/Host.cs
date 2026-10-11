@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -10,7 +11,8 @@ namespace Croicu.Desk.Tools.Service;
 /// Resident-process skeleton (see tasks/resident-process-skeleton.md): stays alive accepting TCP
 /// connections, handling one JSON-RPC 2.0 request per connection (see <see cref="HandleConnection"/>
 /// and docs/PROTOCOL.md), then exits once no connection has been in flight for
-/// <see cref="ISettingsProvider.IdleTimeout"/> -- or once a client sends a <see cref="ShutdownMethod"/>
+/// <see cref="ISettingsProvider.IdleTimeout"/> *and* no handed-off MCP tool is still running (issue
+/// #45; see <see cref="CheckIdle"/>) -- or once a client sends a <see cref="ShutdownMethod"/>
 /// request instead of <see cref="PingMethod"/>, triggering the exact same shutdown path early (see
 /// issue #22: deliberately shares <see cref="_shutdownSignal"/> with the idle-timeout path rather
 /// than growing a second one, since there's nothing else a graceful shutdown needs to do yet).
@@ -82,6 +84,11 @@ internal sealed class Host
 
     private readonly string? _mcpRegistryBaseDirectory;
 
+    // Watch-only handles (no stdio) to tools already handed off to a client -- see TrackChild.
+    private readonly List<Process> _children = [];
+    private readonly object _childrenLock = new();
+    private bool _waitingOnChildren; // Only touched from the single idle-timer callback.
+
     private DateTimeOffset _lastActivity;
     private int _inFlightCount;
     private Timer? _idleTimer;
@@ -138,6 +145,18 @@ internal sealed class Host
         _idleTimer?.Dispose();
         _listener.Stop();
         _acceptThread?.Join();
+
+        // Release the watch handles only -- the tools themselves keep running until their own
+        // parent watchdog (see ParentWatchdog) notices this process is gone.
+        lock (_childrenLock)
+        {
+            foreach (var child in _children)
+            {
+                child.Dispose();
+            }
+
+            _children.Clear();
+        }
 
         Logger.Info("host: shutting down.", Category);
     }
@@ -323,6 +342,7 @@ internal sealed class Host
         {
             tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory);
             var (stdin, stdout) = HandleDuplicator.Duplicate(tool, processId);
+            TrackChild(name, tool.OpenWatchHandle());
             tool.DisownAfterHandoff();
             tool = null; // Ownership (and both pipe ends) already transferred -- don't tear it down below.
 
@@ -359,11 +379,69 @@ internal sealed class Host
         }
     }
 
+    /// <summary>Internal (not private) so a test can register a child without a real handoff.</summary>
+    internal void TrackChild(string name, Process? watchHandle)
+    {
+        if (watchHandle is null)
+        {
+            Logger.Diagnostic($"host: mcp tool '{name}' had already exited by handoff; not tracking it.", Category);
+            return;
+        }
+
+        lock (_childrenLock)
+        {
+            _children.Add(watchHandle);
+        }
+    }
+
+    /// <summary>
+    /// Drops (and disposes) every tracked child that has exited and returns how many are still
+    /// alive. Plain loop, iterating backwards so removal doesn't disturb the remaining indexes.
+    /// </summary>
+    private int PruneChildren()
+    {
+        lock (_childrenLock)
+        {
+            for (var i = _children.Count - 1; i >= 0; i--)
+            {
+                if (_children[i].HasExited)
+                {
+                    _children[i].Dispose();
+                    _children.RemoveAt(i);
+                }
+            }
+
+            return _children.Count;
+        }
+    }
+
     private void CheckIdle(object? state)
     {
         if (Volatile.Read(ref _inFlightCount) > 0)
         {
             return;
+        }
+
+        // Issue #45: a launched tool outlives its handoff, so the idle TTL must not orphan it.
+        // While any tool is alive Service counts as active, which also means the TTL restarts
+        // from whenever the *last* tool exits rather than from the last request.
+        var liveChildren = PruneChildren();
+        if (liveChildren > 0)
+        {
+            if (!_waitingOnChildren)
+            {
+                _waitingOnChildren = true;
+                Logger.Info($"host: {liveChildren} mcp tool(s) still running; idle timeout deferred until they exit.", Category);
+            }
+
+            RecordActivity();
+            return;
+        }
+
+        if (_waitingOnChildren)
+        {
+            _waitingOnChildren = false;
+            Logger.Info("host: last mcp tool exited; idle timeout restarts now.", Category);
         }
 
         TimeSpan idleFor;
