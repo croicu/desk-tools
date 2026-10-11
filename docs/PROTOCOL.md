@@ -55,20 +55,6 @@ Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (P
 this is intentionally minimal, a stepping stone toward the real dispatch work referenced in
 `docs/ARCHITECTURE.md`'s `Host` entry.
 
-## MCP (`scripts/service_mcp_server.py`)
-
-Same shape as `src/Hello`'s server above (hand-rolled, no SDK, newline-delimited JSON-RPC 2.0 over
-stdio, protocol version `2025-06-18` only, same error codes) but in plain-stdlib Python instead of
-C#, and exposing Service's shutdown rather than Hello's own tools -- registered in `.mcp.json` as
-`service`.
-
-- `tools/list` -- one tool, `shutdown` (same empty `inputSchema` shape as `src/Hello`'s tools).
-- `tools/call` -- `shutdown` sends the Echo protocol's `shutdown` request to `Host` (see below) and
-  returns `{"content":[{"type":"text","text":"Shutdown requested."}],"isError":false}` on success.
-  Unlike `src/Hello`'s tools, this one can genuinely fail at runtime (`Host` isn't reachable) --
-  that's `isError: true` with an explanatory message, a tool-level failure, not a JSON-RPC protocol
-  error (an unknown tool *name* is still `-32602`, same distinction `src/Hello` already draws).
-
 ## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
 
 JSON-RPC 2.0, newline-delimited, one request per TCP connection (see
@@ -129,12 +115,6 @@ Three methods today:
   its own read loop gracefully) and exits itself. Makes `desk mcp <name>` usable as a real
   `.mcp.json` `command` entry pointing at Desk instead of the tool's own executable directly --
   Desk never parses the relayed traffic, purely a line relay.
-
-`scripts/shutdown_service.py` is a second, standalone client -- plain-stdlib Python (`socket`/
-`json`/`argparse`, no dependencies), for shutting `Host` down without the .NET toolchain involved.
-Resolves the port the same way (`settings.json`/`settings.local.json`'s `port`, local overriding,
-default `51823`), or `--port` to skip that entirely. Its own copy of the `"shutdown"` method name is
-kept in sync by hand with `Host.ShutdownMethod`, same as `src/Desk`'s.
 
 ## File formats
 

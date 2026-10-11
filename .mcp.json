@@ -35,14 +35,6 @@
         "unlink-program-files"
       ],
       "env": {}
-    },
-    "service": {
-      "type": "stdio",
-      "command": "python",
-      "args": [
-        "scripts/service_mcp_server.py"
-      ],
-      "env": {}
     }
   }
 }

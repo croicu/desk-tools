@@ -4,9 +4,8 @@
 Mirrors src/Hello/Program.cs's own shape (no SDK, newline-delimited JSON-RPC 2.0 over stdio,
 protocol version "2025-06-18" only, same error codes) but in plain-stdlib Python -- the first
 tool registered via scripts/Scripts.csproj's build-time MCP registry generation (see issue #29's
-extensibility goal and that project's own remarks) rather than a per-.csproj <McpToolName>. Unlike
-scripts/service_mcp_server.py, this has no Service-control logic of its own and so no need to
-import find_repo_root/resolve_port from shutdown_service.py -- entirely self-contained.
+extensibility goal and that project's own remarks) rather than a per-.csproj <McpToolName>.
+Entirely self-contained: scripts/ tools share no code with each other.
 """
 
 from __future__ import annotations

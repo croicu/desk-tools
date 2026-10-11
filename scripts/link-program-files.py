@@ -41,7 +41,7 @@ whole reason this project's Service runs elevated in the first place. See
 unlink-program-files.py for the reverse operation. Mirrors goodbye.py's own shape (no SDK,
 newline-delimited JSON-RPC 2.0 over stdio, protocol version "2025-06-18" only, same error codes);
 entirely self-contained, same reasoning as goodbye.py's own remarks on why it doesn't share code
-with service_mcp_server.py/shutdown_service.py.
+with the other scripts/ tools.
 """
 
 from __future__ import annotations
