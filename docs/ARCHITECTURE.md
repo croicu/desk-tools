@@ -8,7 +8,8 @@ Modules, data flow, and contracts for `desk-tools`.
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
      Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
      minimal stdio MCP server, references Base.csproj), src/Desk/ (a console client for
-     src/Service's Host, references Base.csproj), and scripts/ (standalone Python utilities outside
+     src/Service's Host, references Base.csproj), src/Secrets/ (KeePass-backed secret retrieval,
+     references Base.csproj), and scripts/ (standalone Python utilities outside
      the .NET build entirely): what it owns, what it depends on. -->
 
 Base.dll is designed to be safe inside a service hosting multiple heterogeneous clients in one
@@ -397,6 +398,46 @@ is "win-x64" -- `Service.csproj`'s own `Platform/` selection, not the literal ho
 only other precondition (the real Hello build) has nothing to do with the RID either. Passes on a
 plain `dotnet test` now, since win-x64 is `tests/Directory.Build.props`' own default -- the guard
 only actually fires if someone deliberately overrides to a different RID.
+
+`src/Secrets/` (`Secrets.dll`, namespace `Croicu.Desk.Tools.Secrets`, [issue #50](https://github.com/croicu/desk-tools/issues/50)):
+reads credentials out of the user's KeePassXC database so an elevated MCP tool can use a secret
+without any value reaching a medium-integrity process. References `Base.csproj` only; types are
+`internal`. **Slice 1 (retrieval core) only** -- nothing in `src/Service` uses it yet, and
+`Service.csproj` does not reference it until the wiring slice (the design, including the elevated
+password prompt, file picker, `<McpSecret>` declarations and `ToolLauncher` delivery via environment
+variables, is in the issue).
+
+- `Vault.Read(entry, keys)`: the broker. Asks an injected `IPasswordSource` for the master password
+  (up to three attempts, telling the source when one is rejected), has `KeePassCli` read the entry's
+  Notes once (one key derivation however many keys), and extracts each `key: value` line. Nothing is
+  cached, so rotation needs no invalidation. Errors name the entry and key, never a value.
+- `KeePassCli`: runs `keepassxc-cli show -q -a Notes <db> <entry>` through an injected
+  `IProcessRunner`, password as one line on stdin (never the command line). Under `-q` a wrong
+  password exits 1 with **empty** stderr while a missing entry exits 1 with a message, so exit 1 +
+  empty stderr is classified as an authentication failure (re-prompt) and any other failure as a
+  plain one -- not by matching message text, which may be localized.
+- `Platform/{Windows,Linux,Neutral}/CliLocation.cs` (same per-RID selection as
+  `src/Service/Platform/`; flat namespace): the CLI is only ever run from the machine-wide Program
+  Files install, never from PATH, an environment variable, or user-writable configuration, and the
+  resolved path must stay under that directory. Windows is the only real implementation; the Linux
+  and Neutral variants are placeholders that throw `AppError` (guessing a path would be the very
+  mistake this class prevents), tracked as a follow-up. Everything else in the assembly is portable
+  -- the Platform split also gives the later password prompt and file picker (P/Invoke) a home.
+- `NotesParser`: finds the single `key: value` line in the Notes bytes (`
+` or `
+`, exact
+  case-sensitive key); a missing, duplicated, or empty key is an error.
+- `IProcessRunner`/`ProcessResult`/`ProcessRunner` live in **`src/Base`** (`Interfaces.cs` /
+  `ProcessRunner.cs`), not here -- nothing about running a program is KeePass-specific, and
+  `src/Secrets` consumes them as an ordinary reference. `ProcessRunner` reads stdout as raw bytes
+  into pinned buffers zeroed as they are outgrown, never through a `StreamReader`, so a caller can
+  zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
+  `string` where it must, in the launched tool's environment block.
+- Tests: `tests/Secrets/Unit/` (offline, fakes) and `tests/Secrets/Integration/`
+  (`[TestCategory("Integration")]`, real `keepassxc-cli` against the dummy
+  `tests/Secrets/data/Secrets.kdbx`, master password `password`; Inconclusive when KeePassXC isn't
+  installed machine-wide). No database is shipped: a known-password file in Program Files would be
+  readable by exactly the processes the design keeps out.
 
 ## Data flow
 

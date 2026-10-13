@@ -85,3 +85,25 @@ public interface IConsole
 
     void ReleaseConsole();
 }
+
+/// <summary>
+/// Runs an external program and captures its output -- the injectable seam for anything that has to
+/// shell out (Architecture convention 6): production uses <see cref="ProcessRunner"/>, tests pass a
+/// fake. Output comes back as raw bytes, never a <see cref="string"/>, so a caller whose output can
+/// carry something sensitive (a secret, say) can zero it afterward -- an immutable string can't be.
+/// </summary>
+public interface IProcessRunner
+{
+    /// <summary>
+    /// Runs <paramref name="fileName"/> with <paramref name="args"/>, writes <paramref name="stdin"/>
+    /// to its standard input and closes it, and waits for it to exit. Throws <see cref="AppError"/> if
+    /// it can't be started or doesn't finish in time.
+    /// </summary>
+    ProcessResult Run(string fileName, IReadOnlyList<string> args, ReadOnlySpan<byte> stdin);
+}
+
+/// <summary>
+/// Outcome of an <see cref="IProcessRunner"/> run. <see cref="Stdout"/> is raw bytes the caller owns
+/// and should zero once done with it when it may be sensitive; <see cref="Stderr"/> is text.
+/// </summary>
+public sealed record ProcessResult(int ExitCode, byte[] Stdout, string Stderr);

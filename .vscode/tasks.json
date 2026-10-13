@@ -30,6 +30,14 @@
       "problemMatcher": "$msCompile"
     },
     {
+      "label": "test-secrets-integration",
+      "type": "shell",
+      // The real keepassxc-cli (machine-wide KeePassXC install) against the dummy
+      // tests/Secrets/data/Secrets.kdbx; Inconclusive, not failed, where it isn't installed.
+      "command": "dotnet test tests/Secrets --filter TestCategory=Integration",
+      "problemMatcher": "$msCompile"
+    },
+    {
       "label": "format",
       "type": "shell",
       "command": "dotnet format",

@@ -447,6 +447,10 @@ dotnet build installer/Setup.wixproj
 
 ## New Task
 
+- **Secrets** -- [issue #50](https://github.com/croicu/desk-tools/issues/50): give elevated MCP tools
+  credentials from the user's KeePassXC database without any secret value reaching a
+  medium-integrity process. In Implementation (slice 1: retrieval core); the issue holds the design.
+
 ## Pending Tasks
 
 ## Completed Tasks
