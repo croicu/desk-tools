@@ -3,13 +3,16 @@ using System.Text.Json;
 namespace Croicu.Desk.Tools.Base;
 
 /// <summary>
-/// Layered JSON settings, three tiers deep: the module's own directory's <c>settings.json</c> (the
-/// base -- e.g. the file shipped alongside an installed build), then the working directory's own
-/// <c>settings.json</c> overriding it key-by-key (a per-deployment/per-invocation override), then
-/// the working directory's <c>settings.local.json</c> overriding that (a personal, gitignored
-/// override file -- see .gitignore). Load once via <see cref="Load"/>, then read back via
-/// <see cref="Current"/>. Implements <see cref="ISettingsProvider"/> so a caller that accepts that
-/// interface works unmodified with a real, file-backed instance.
+/// Layered JSON settings: the module's own directory's <c>settings.json</c> (the base -- e.g. the
+/// file shipped alongside an installed build), then the working directory's own <c>settings.json</c>
+/// overriding it key-by-key (a per-deployment/per-invocation override), then -- for
+/// <see cref="Section"/> only -- the per-user file (<see cref="UserSettings"/>), then the working
+/// directory's <c>settings.local.json</c> overriding all of that (a personal, gitignored override
+/// file -- see .gitignore). Load once via <see cref="Load"/>, then read back via
+/// <see cref="Current"/>. <see cref="Load"/> (the core <c>"settings"</c> object) never reads the
+/// per-user file: it is user-writable but read by an elevated Service, so it may only supply
+/// non-core sections (see <see cref="UserSettings"/>). Implements <see cref="ISettingsProvider"/> so
+/// a caller that accepts that interface works unmodified with a real, file-backed instance.
 /// </summary>
 public sealed record Settings : ISettingsProvider
 {
@@ -182,34 +185,110 @@ public sealed record Settings : ISettingsProvider
     }
 
     /// <summary>
-    /// Returns one named top-level section of settings.json (merged across all three tiers -- see
-    /// the class doc comment), e.g. a plugin's or subsystem's own config section living as a
-    /// sibling of the core "settings" object, not nested inside it. settings.json's shape is
-    /// uniform across consumer repos, so this is the public entry point for a caller outside this
-    /// class to reach its own section without knowing how the file is read or merged -- that stays
-    /// encapsulated in <see cref="LoadTopLevel"/> (distinct from <see cref="LoadPayload"/>, which
-    /// only reads the "settings" object itself for <see cref="Load"/>'s own use).
+    /// Returns one named top-level section of the settings files, merged key-by-key across the tiers
+    /// in order -- module <c>settings.json</c>, working-directory <c>settings.json</c>, the per-user
+    /// file (<paramref name="userPath"/>, default <see cref="UserSettings.DefaultPath"/>), then
+    /// <c>settings.local.json</c> -- later tiers overriding earlier ones. E.g. a plugin's or
+    /// subsystem's own config section living as a sibling of the core "settings" object, not nested
+    /// inside it. settings.json's shape is uniform across consumer repos, so this is the public entry
+    /// point for a caller outside this class to reach its own section without knowing how the files
+    /// are read or merged.
+    ///
+    /// The module and working-directory tiers are strict (invalid JSON, or the section not being an
+    /// object, throws <see cref="SettingsError"/>); <c>settings.local.json</c> is lenient about bad
+    /// JSON (logged and ignored) but a non-object section still throws; the per-user tier is lenient
+    /// about both, since any process running as the user can write it and a bad file must not take
+    /// down an elevated Service. The per-user tier is never read for the core <c>"settings"</c>
+    /// section -- see <see cref="UserSettings"/>.
     /// </summary>
-    public static Dictionary<string, JsonElement> Section(string name, string? path = null, string? localPath = null, string? modulePath = null)
+    public static Dictionary<string, JsonElement> Section(string name, string? path = null, string? localPath = null, string? modulePath = null, string? userPath = null)
     {
-        var topLevel = LoadTopLevel(modulePath ?? DefaultModulePath, path ?? DefaultSettingsPath, localPath ?? DefaultLocalPath);
-        if (!topLevel.TryGetValue(name, out var sectionEl))
-        {
-            return new Dictionary<string, JsonElement>();
-        }
-
-        if (sectionEl.ValueKind != JsonValueKind.Object)
-        {
-            throw new SettingsError($"'{name}' in settings.json must be a JSON object.");
-        }
+        modulePath ??= DefaultModulePath;
+        path ??= DefaultSettingsPath;
+        localPath ??= DefaultLocalPath;
 
         var result = new Dictionary<string, JsonElement>();
-        foreach (var prop in sectionEl.EnumerateObject())
+
+        var moduleFound = MergeSection(result, name, modulePath, "module", lenientFile: false, lenientShape: false);
+        var pathFound = MergeSection(result, name, path, "working directory", lenientFile: false, lenientShape: false);
+
+        if (!moduleFound && !pathFound)
         {
-            result[prop.Name] = prop.Value.Clone();
+            // Section()'s own consumer effect is narrower than Load()'s -- neither tier having a
+            // file just means whatever section the caller asked for comes back empty (or from the
+            // personal tiers below), not a run-wide behavior change -- so Info rather than Load()'s
+            // Warning for the same both-missing condition.
+            Logger.Info($"no settings file found at module path '{modulePath}' or working directory '{path}'; {nameof(Section)} relies on the remaining tiers.", DiagnosticsCategories.Settings);
         }
 
+        var resolvedUserPath = userPath ?? UserSettings.DefaultPath;
+        if (string.Equals(name, UserSettings.CoreSection, StringComparison.Ordinal))
+        {
+            Logger.Diagnostic($"per-user settings are not honored for the core '{name}' section; skipping that tier.", DiagnosticsCategories.Settings);
+        }
+        else if (resolvedUserPath is null)
+        {
+            Logger.Diagnostic("no per-user settings location on this platform; skipping that tier.", DiagnosticsCategories.Settings);
+        }
+        else
+        {
+            MergeSection(result, name, resolvedUserPath, "per-user", lenientFile: true, lenientShape: true);
+        }
+
+        MergeSection(result, name, localPath, "local", lenientFile: true, lenientShape: false);
+
         return result;
+    }
+
+    /// <summary>
+    /// Merges one file's named top-level section into <paramref name="result"/> key-by-key. Returns
+    /// whether the file existed. <paramref name="lenientFile"/> turns invalid JSON, or a root that
+    /// isn't an object, from a <see cref="SettingsError"/> into a logged warning (the tier is ignored);
+    /// <paramref name="lenientShape"/> does the same for the section itself not being an object.
+    /// </summary>
+    private static bool MergeSection(Dictionary<string, JsonElement> result, string name, string filePath, string tierName, bool lenientFile, bool lenientShape)
+    {
+        if (!File.Exists(filePath))
+        {
+            Logger.Diagnostic($"no {tierName} settings file at '{filePath}'.", DiagnosticsCategories.Settings);
+            return false;
+        }
+
+        using var doc = lenientFile ? TryParseFile(filePath) : ParseFileStrict(filePath);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            if (!lenientFile)
+            {
+                throw new SettingsError($"'{filePath}' must contain a JSON object.");
+            }
+
+            // Invalid JSON syntax (doc is null, see TryParseFile) or valid JSON in the wrong shape --
+            // ignored by design for the personal/user tiers, but surfaced rather than silent.
+            Logger.Warning($"{tierName} settings file '{filePath}' exists but is not a JSON object (or not valid JSON); ignoring it.", DiagnosticsCategories.Settings);
+            return true;
+        }
+
+        if (doc.RootElement.TryGetProperty(name, out var sectionEl))
+        {
+            if (sectionEl.ValueKind != JsonValueKind.Object)
+            {
+                if (!lenientShape)
+                {
+                    throw new SettingsError($"'{name}' in '{filePath}' must be a JSON object.");
+                }
+
+                Logger.Warning($"'{name}' in {tierName} settings file '{filePath}' is not a JSON object; ignoring it.", DiagnosticsCategories.Settings);
+                return true;
+            }
+
+            foreach (var prop in sectionEl.EnumerateObject())
+            {
+                result[prop.Name] = prop.Value.Clone();
+            }
+        }
+
+        Logger.Diagnostic($"{tierName} settings file found and parsed: '{filePath}'", DiagnosticsCategories.Settings);
+        return true;
     }
 
     /// <summary>
@@ -304,87 +383,6 @@ public sealed record Settings : ISettingsProvider
             {
                 payload[prop.Name] = prop.Value.Clone();
             }
-        }
-
-        Logger.Diagnostic($"{tierName} settings file found and parsed: '{path}'", DiagnosticsCategories.Settings);
-        return true;
-    }
-
-    /// <summary>
-    /// Reads the module-dir and working-directory settings.json's actual top-level properties (the
-    /// "settings" object itself included, as just another entry; module first, working directory
-    /// overriding it key-by-key), then the working directory's settings.local.json's own top-level
-    /// properties overriding that. Distinct from <see cref="LoadPayload"/>, which reaches inside
-    /// "settings" instead of returning it whole -- <see cref="Section"/> is the only caller of this
-    /// method.
-    /// </summary>
-    private static Dictionary<string, JsonElement> LoadTopLevel(string modulePath, string path, string localPath)
-    {
-        var payload = new Dictionary<string, JsonElement>();
-
-        var moduleFound = MergeTopLevelObject(payload, modulePath, "module");
-        var pathFound = MergeTopLevelObject(payload, path, "working directory");
-
-        if (!moduleFound && !pathFound)
-        {
-            // Section()'s own consumer effect is narrower than Load()'s -- neither tier having a
-            // file just means whatever section the caller asked for comes back empty, not a
-            // run-wide behavior change -- so Info rather than Load()'s Warning for the same
-            // both-missing condition.
-            Logger.Info($"no settings file found at module path '{modulePath}' or working directory '{path}'; {nameof(Section)} returns an empty section.", DiagnosticsCategories.Settings);
-        }
-
-        if (File.Exists(localPath))
-        {
-            using var doc = TryParseFile(localPath);
-            if (doc is not null && doc.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var prop in doc.RootElement.EnumerateObject())
-                {
-                    payload[prop.Name] = prop.Value.Clone();
-                }
-
-                Logger.Diagnostic($"local settings override found and parsed: '{localPath}'", DiagnosticsCategories.Settings);
-            }
-            else
-            {
-                // Invalid JSON syntax (doc is null, see TryParseFile) or valid JSON in the wrong
-                // shape -- both silently ignored by design, same reasoning as LoadPayload's own
-                // local-file handling.
-                Logger.Warning($"local settings file '{localPath}' exists but its root is not a JSON object; ignoring it.", DiagnosticsCategories.Settings);
-            }
-        }
-        else
-        {
-            Logger.Diagnostic($"no local settings override at '{localPath}'.", DiagnosticsCategories.Settings);
-        }
-
-        return payload;
-    }
-
-    /// <summary>
-    /// Merges one file's whole top-level object into <paramref name="payload"/> (key-by-key).
-    /// <see cref="LoadTopLevel"/>'s counterpart to <see cref="MergeSettingsObject"/> -- same
-    /// "strict" (malformed file throws) treatment, just without reaching inside a "settings"
-    /// sub-object first. Returns whether the file existed.
-    /// </summary>
-    private static bool MergeTopLevelObject(Dictionary<string, JsonElement> payload, string path, string tierName)
-    {
-        if (!File.Exists(path))
-        {
-            Logger.Diagnostic($"no {tierName} settings file at '{path}'.", DiagnosticsCategories.Settings);
-            return false;
-        }
-
-        using var doc = ParseFileStrict(path);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object)
-        {
-            throw new SettingsError($"'{path}' must contain a JSON object.");
-        }
-
-        foreach (var prop in doc.RootElement.EnumerateObject())
-        {
-            payload[prop.Name] = prop.Value.Clone();
         }
 
         Logger.Diagnostic($"{tierName} settings file found and parsed: '{path}'", DiagnosticsCategories.Settings);

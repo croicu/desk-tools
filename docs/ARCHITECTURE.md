@@ -410,6 +410,18 @@ only other precondition (the real Hello build) has nothing to do with the RID ei
 plain `dotnet test` now, since win-x64 is `tests/Directory.Build.props`' own default -- the guard
 only actually fires if someone deliberately overrides to a different RID.
 
+`src/Base/UserSettings.cs` ([issue #58](https://github.com/croicu/desk-tools/issues/58)): the per-user
+settings file, `%LOCALAPPDATA%\Desk Tools\settings.json` (`Environment.SpecialFolder.LocalApplicationData`,
+so also `~/.local/share` on Linux; `DefaultPath` is null, not a relative fallback, on a platform with no such
+folder). `Settings.Section()` merges it key-by-key between the working-directory `settings.json` and
+`settings.local.json`; `UserSettings.Set(section, key, value)` is the write side (read-modify-write that keeps
+every other section/key, temp file then move, refuses the core section and never overwrites a file that is not
+valid JSON). The trust rule that shapes all of it: the file is writable by any process running as the user but
+read by the elevated Service, so it is honored only for non-core sections -- never `logDir`/`port`/`debug`/
+`idleTimeout`/`logLevel` -- and a malformed file is ignored with a warning, not thrown. Cross-platform
+(Architecture convention 11); no static mutable state (convention 10). Replaces the separate `secrets.json` the
+Secrets design first assumed: the file picker will record `secrets.databasePath` here.
+
 `src/Secrets/` (`Secrets.dll`, namespace `Croicu.Desk.Tools.Secrets`, [issue #50](https://github.com/croicu/desk-tools/issues/50)):
 reads credentials out of the user's KeePassXC database so an elevated MCP tool can use a secret
 without any value reaching a medium-integrity process. References `Base.csproj` only; types are
