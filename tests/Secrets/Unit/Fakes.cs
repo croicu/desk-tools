@@ -109,3 +109,45 @@ internal sealed class FakePasswordPrompt : IPasswordPrompt
         return bytes;
     }
 }
+
+/// <summary>Returns a queued answer (null = cancelled) and records how it was asked.</summary>
+internal sealed class FakeFilePicker : IFilePicker
+{
+    private readonly string? _answer;
+
+    public FakeFilePicker(string? answer)
+    {
+        _answer = answer;
+    }
+
+    public List<(string Title, string FilterName, string Extension)> Asks { get; } = new();
+
+    public string? Pick(string title, string filterName, string extension)
+    {
+        Asks.Add((title, filterName, extension));
+        return _answer;
+    }
+}
+
+/// <summary>An in-memory <see cref="IDatabasePathStore"/> that counts writes.</summary>
+internal sealed class FakeDatabasePathStore : IDatabasePathStore
+{
+    public FakeDatabasePathStore(string? saved)
+    {
+        Saved = saved;
+    }
+
+    public string? Saved { get; private set; }
+
+    public int Writes { get; private set; }
+
+    public string Description => "'secrets.databasePath' in the fake store";
+
+    public string? Get() => Saved;
+
+    public void Set(string path)
+    {
+        Saved = path;
+        Writes++;
+    }
+}

@@ -425,10 +425,10 @@ Secrets design first assumed: the file picker will record `secrets.databasePath`
 `src/Secrets/` (`Secrets.dll`, namespace `Croicu.Desk.Tools.Secrets`, [issue #50](https://github.com/croicu/desk-tools/issues/50)):
 reads credentials out of the user's KeePassXC database so an elevated MCP tool can use a secret
 without any value reaching a medium-integrity process. References `Base.csproj` only; types are
-`internal`. **Slices 1-2 only (retrieval core and the master-password prompt)** -- nothing in
+`internal`. **Slices 1-3 only (retrieval core, the master-password prompt, and finding the database)** -- nothing in
 `src/Service` uses it yet, and `Service.csproj` does not reference it until the wiring slice (the
-design, including the file picker, `<McpSecret>` declarations and `ToolLauncher` delivery via
-environment variables, is in the issue).
+design, including `<McpSecret>` declarations and `ToolLauncher` delivery via environment variables, is
+in the issue).
 
 - `Vault.Read(entry, keys)`: the broker. Asks an injected `IPasswordSource` for the master password
   (up to three attempts, telling the source when one is rejected), has `KeePassCli` read the entry's
@@ -466,6 +466,22 @@ environment variables, is in the issue).
   can't script it or read the box (UIPI). Not DPI-aware, English only. Linux/Neutral throw `AppError`
   (#51). The Windows tests drive the real dialog by sending it messages, tagged `Integration` and
   not parallelized.
+- `DatabaseLocation` ([issue #61](https://github.com/croicu/desk-tools/issues/61)): finds the KeePass
+  database. The saved `secrets.databasePath` (via `DatabasePathStore`: read through `Settings.Section`, written
+  with `UserSettings.Set`, i.e. the per-user file) is used as-is and the file picker is **not** invoked; only a
+  missing/empty value opens the picker, validates the answer, and saves it. A saved value that is present but
+  unusable is an error to fix (with a detailed message saying where the setting lives), not a reason to open a
+  dialog on an elevated background process; cancelling the picker is likewise a detailed error and saves nothing.
+- `DatabasePathRule`: a database path must be absolute, an existing **local** `.kdbx` file. UNC paths and
+  network drives are refused outright -- for the saved value too, not only the picked one: the per-user file is
+  writable by any process running as the user, and the elevated Service opening a UNC path would hand that
+  server its NTLM credentials. UNC is rejected on the text alone, before anything touches the network.
+- `Platform/{Windows,Linux,Neutral}/FilePicker.cs` (`IFilePicker`): Windows is P/Invoke `GetOpenFileNameW` (no
+  COM, no WinForms) on its own STA thread, owned by a hidden topmost window so a background elevated process
+  still gets a visible dialog; `*.kdbx` filter, `OFN_NOCHANGEDIR` (don't pin the directory the user browsed
+  through) and `OFN_DONTADDTORECENT`. Linux/Neutral throw `AppError` (#51). The Windows tests drive the real
+  dialog (tagged `Integration`, not parallelized): they type into its file-name box with posted `WM_CHAR`
+  messages, because setting that auto-completing box's text from another thread crashed the process natively.
 - `IProcessRunner`/`ProcessResult`/`ProcessRunner` live in **`src/Base`** (`Interfaces.cs` /
   `ProcessRunner.cs`), not here -- nothing about running a program is KeePass-specific, and
   `src/Secrets` consumes them as an ordinary reference. `ProcessRunner` reads stdout as raw bytes
@@ -473,11 +489,13 @@ environment variables, is in the issue).
   zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
   `string` where it must, in the launched tool's environment block.
 - `tests/Apps/Secrets` (`Secrets.App`, not shipped): a manual command-line driver. `Secrets.App
-  [databasePath] [entry] [key]` (all optional; defaults to the dummy database, `ntfy`, `desk-pager`)
-  shows the real password dialog, reads the secret through the whole stack, and prints it -- on
-  purpose, so it is for the dummy database. Meant to be set as the startup project in Visual Studio
-  to step through the dialog, retries, CLI call and parsing; it reaches the `internal` Secrets types
-  through an `InternalsVisibleTo`. Windows only (exits 2 elsewhere).
+  [--picker] [--user-settings <file>] [databasePath] [entry] [key]` (all optional; defaults to the dummy
+  database, `ntfy`, `desk-pager`) shows the real password dialog, reads the secret through the whole stack, and
+  prints it -- on purpose, so it is for the dummy database. `--picker` takes the database from the saved
+  `secrets.databasePath` setting or the file dialog instead of `databasePath`, and `--user-settings` redirects
+  that saved setting to a scratch file so trying it doesn't touch your real per-user file. Meant to be set as the
+  startup project in Visual Studio to step through the dialogs, retries, CLI call and parsing; it reaches the
+  `internal` Secrets types through an `InternalsVisibleTo`. Windows only (exits 2 elsewhere).
 - Tests: `tests/Secrets/Unit/` (offline, fakes) and `tests/Secrets/Integration/`
   (`[TestCategory("Integration")]`, real `keepassxc-cli` against the dummy
   `tests/Secrets/data/Secrets.kdbx`, master password `password`; Inconclusive when KeePassXC isn't
