@@ -84,8 +84,9 @@ public static class Program
                 break;
             case DeskCommand.Mcp:
                 var (stdin, stdout) = LaunchMcpToolWithAutoStart(client, arguments.McpToolName!);
-                McpProxy.Run(stdin, stdout);
-                break;
+
+                // Non-zero when the tool went away before the client did -- see McpProxy.Run.
+                return McpProxy.Run(stdin, stdout);
             default:
                 throw new ArgumentOutOfRangeException(nameof(arguments), arguments.Command, "Unhandled DeskCommand.");
         }

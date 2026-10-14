@@ -1,9 +1,8 @@
 namespace Croicu.Desk.Tools.Secrets;
 
 /// <summary>
-/// Supplies the KeePass master password, one attempt at a time. Slice 1 only has fakes; the real
-/// implementation is the elevated prompt (a later slice), which also decides how long a good
-/// password is held.
+/// Supplies the KeePass master password, one attempt at a time. <see cref="PromptedPassword"/> is
+/// the real implementation (prompts, then holds the password until Service exits); tests use fakes.
 /// </summary>
 internal interface IPasswordSource
 {
@@ -15,4 +14,20 @@ internal interface IPasswordSource
 
     /// <summary>The password last returned by <see cref="Get"/> was rejected; drop it if held.</summary>
     void Rejected();
+}
+
+/// <summary>
+/// Asks the user for the KeePass master password -- the platform-specific part (a Windows dialog
+/// today, see <c>Platform/</c>) behind <see cref="PromptedPassword"/>, which adds the holding and
+/// re-prompt policy. Kept as an interface so that policy is unit-testable without a window.
+/// </summary>
+internal interface IPasswordPrompt
+{
+    /// <summary>
+    /// Shows the prompt for <paramref name="databasePath"/>, labelled "attempt
+    /// <paramref name="attempt"/> + 1 of <paramref name="maxAttempts"/>" when the attempt is not the
+    /// first. Returns the password as bytes the caller zeroes, or null if the user cancelled or the
+    /// prompt timed out.
+    /// </summary>
+    byte[]? Ask(string databasePath, int attempt, int maxAttempts);
 }
