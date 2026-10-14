@@ -184,6 +184,13 @@ After any change that affects the public interface, CLI, or file formats, update
 # a high privilege mode") only really exists on Windows today, so a plain build/test already
 # exercises the real Platform/Windows/ implementations (SingletonGuard, HandleDuplicator), not
 # always-succeeding/always-throwing stand-ins. Output lands in out/<Configuration>/net10.0/win-x64/.
+#
+# A build first shuts down this repo's own running MCP servers (src/Base/Base.csproj's
+# ShutdownDevMcpServers target: runs `Desk.exe shutdown` when a Service.exe is running -- Service
+# stops, its tools exit, their `desk mcp` proxies exit), because they hold out\ files open and
+# would otherwise fail the copy (MSB3021/MSB3027). Afterward the MCP servers show as disconnected:
+# reconnect with /mcp. Windows only; skipped on CI (CI=true); opt out with
+# DESK_TOOLS_SKIP_SHUTDOWN=1; never fails the build.
 dotnet build
 
 # Run
