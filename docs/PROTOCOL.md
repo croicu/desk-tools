@@ -123,15 +123,32 @@ Three methods today:
 
 ### settings.json discovery order
 
-`Settings.Load()`/`Settings.Section()` (`src/Base/Settings.cs`) read three tiers, each overriding
-the previous key-by-key:
+`Settings.Load()`/`Settings.Section()` (`src/Base/Settings.cs`) read these tiers, each overriding
+the previous key-by-key (`Settings.Load()`, the core `"settings"` object, reads tiers 1, 2 and 4; the
+per-user tier 3 is read by `Settings.Section()` only -- see below):
 
 1. `settings.json` next to the running module (`AppContext.BaseDirectory` -- e.g. the install
    directory of a deployed build). The base tier.
 2. `settings.json` in the current working directory. A per-deployment/per-invocation override of
    the module tier.
-3. `settings.local.json` in the current working directory -- a personal, gitignored override (see
-   `.gitignore`) of the previous two.
+3. The per-user file, `%LOCALAPPDATA%\Desk Tools\settings.json` (the platform's local
+   application-data folder elsewhere; [issue #58](https://github.com/croicu/desk-tools/issues/58)).
+   Written by the program itself -- `UserSettings.Set(section, key, value)` -- for values only the
+   user's own machine can know, e.g. the KeePass database path the secrets file picker records
+   (`secrets` section, `databasePath` key; the picker runs only when it is missing or empty).
+4. `settings.local.json` in the current working directory -- a personal, gitignored override (see
+   `.gitignore`) of everything above, including the per-user file.
+
+**The per-user file is honored only for non-core sections.** Any process running as the user can
+write it, while Service reads it elevated, so it may supply sections that sit beside the `"settings"`
+object (read with `Settings.Section(name)`), never the core `"settings"` object itself (`logDir`,
+`port`, `debug`, `idleTimeout`, `logLevel`, ...): `Settings.Load()` does not read it, `Section("settings")`
+skips it, and `UserSettings.Set` refuses that section. A per-user file that is not valid JSON, or a
+section in it that is not an object, is logged and ignored rather than thrown, so it cannot take down
+an elevated Service; `UserSettings.Set` in turn never overwrites an existing file that is not valid
+JSON. Writes go to a temporary file that is moved into place (a reader never sees a half-written
+file); concurrent writers are last-one-wins. `Settings.Section()` merges the named section key-by-key
+across the tiers.
 
 The checked-in module-tier `settings.json` (and an optional, gitignored `settings.local.json`)
 live at the **repo root**, not inside `src/Service/` or `src/Hello/` -- `src/Service` and

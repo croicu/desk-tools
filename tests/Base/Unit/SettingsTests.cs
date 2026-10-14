@@ -3,7 +3,7 @@ using Croicu.Desk.Tools.Base;
 namespace Croicu.Desk.Tools.Base.Tests.Unit;
 
 /// <summary>
-/// Every test passes explicit path/localPath/modulePath arguments to Settings.Load()/Section()
+/// Every test passes explicit path/localPath/modulePath (and, for Section(), userPath) arguments to Settings.Load()/Section()
 /// rather than relying on the current directory or AppContext.BaseDirectory's real settings.json --
 /// each test also uses its own uniquely-named temp file, so these run safely in parallel despite
 /// Settings.Load()'s Settings.Current side effect (never read back here).
@@ -305,7 +305,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("not valid json");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath(), userPath: NonExistentPath()));
         }
         finally
         {
@@ -391,7 +391,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "settings": {} }""");
         try
         {
-            var section = Settings.Section("nonexistent", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+            var section = Settings.Section("nonexistent", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath(), userPath: NonExistentPath());
 
             Assert.IsEmpty(section);
         }
@@ -407,7 +407,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "mySection": { "key": "value" } }""");
         try
         {
-            var section = Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+            var section = Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath(), userPath: NonExistentPath());
 
             Assert.IsTrue(section.ContainsKey("key"));
             Assert.AreEqual("value", section["key"].GetString());
@@ -424,7 +424,7 @@ public sealed class SettingsTests
         var path = WriteTempSettingsFile("""{ "mySection": "not-an-object" }""");
         try
         {
-            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Section("mySection", path: path, localPath: NonExistentPath(), modulePath: NonExistentPath(), userPath: NonExistentPath()));
         }
         finally
         {
