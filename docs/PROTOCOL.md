@@ -104,7 +104,8 @@ Three methods today:
   process, since `Host` is meant to run at the scheduled task's own elevated integrity level, not
   Desk's own (typically lower) one -- then retries once. Only works once Service has actually been
   installed via the MSI (the scheduled task must already be registered); fails with a clear error
-  otherwise, or if it never becomes reachable within the startup wait.
+  otherwise, or if it never becomes reachable within the startup wait (60 seconds: a cold first
+  start of a freshly built Service has been seen taking about 30).
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
   running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
   prints a fixed confirmation rather than the raw JSON-RPC result.

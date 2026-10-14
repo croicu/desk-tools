@@ -17,22 +17,43 @@ namespace Croicu.Desk.Tools.Desk;
 /// </summary>
 internal static class McpProxy
 {
+    /// <summary>The client disconnected first (the normal way for a proxy to end).</summary>
+    internal const int ExitClientDisconnected = 0;
+
+    /// <summary>The tool went away first -- see <see cref="Run"/>.</summary>
+    internal const int ExitToolGone = 1;
+
+    private const string Category = "desk";
+
     // No BOM: same reasoning as Host.WriteEncoding/Client.WriteEncoding -- the tool's own stdin
     // reader expects plain UTF-8 JSON-RPC text with no preamble.
     private static readonly UTF8Encoding WriteEncoding = new(encoderShouldEmitUTF8Identifier: false);
+
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Opens the two duplicated pipe handles <see cref="Client.LaunchMcpTool"/> returned and pumps
     /// lines between them and <paramref name="input"/> (defaults to <see cref="Console.In"/>) /
     /// this process's own stdout (via <see cref="Logger.Print"/>, per CLAUDE.md's "Console.* is
     /// confined to src/Base/Sinks" rule -- <see cref="Program.Start"/> installs a silent sink before
-    /// this runs, so nothing but these lines ever reaches real stdout). Blocks until our own stdin
-    /// reaches EOF (the parent MCP client disconnected), then closes this process's copy of the
-    /// tool's stdin -- so the tool sees EOF too and exits its own read loop gracefully, the same
-    /// shutdown path a real client disconnect takes (see docs/PROTOCOL.md's Hello entry) -- and
-    /// gives the tool's own output a bounded chance to finish draining before returning.
+    /// this runs, so nothing but these lines ever reaches real stdout).
+    ///
+    /// Returns as soon as <i>either</i> side ends, because a proxy is worthless without the other
+    /// half (issue #54):
+    /// <list type="bullet">
+    /// <item>The client's input ended (the parent MCP client disconnected): closes this process's
+    /// copy of the tool's stdin -- so the tool sees EOF too and exits its own read loop gracefully,
+    /// the same shutdown path a real client disconnect takes (see docs/PROTOCOL.md's Hello entry) --
+    /// gives the tool's own output a bounded chance to finish draining, and returns
+    /// <see cref="ExitClientDisconnected"/>.</item>
+    /// <item>The tool's output ended first (the tool exited, or Service went away and its watchdog
+    /// reaped it): logs a warning and returns <see cref="ExitToolGone"/>, so the MCP client sees the
+    /// server exit and can reconnect, instead of this process lingering forever.</item>
+    /// </list>
+    /// Both pumps run on background threads (reading <see cref="Console.In"/> can't be interrupted),
+    /// so returning never waits on a read that may never complete.
     /// </summary>
-    internal static void Run(long stdinHandleValue, long stdoutHandleValue, TextReader? input = null)
+    internal static int Run(long stdinHandleValue, long stdoutHandleValue, TextReader? input = null)
     {
         Console.Out.NewLine = "\n";
 
@@ -42,13 +63,53 @@ internal static class McpProxy
         using var toolStdin = new StreamWriter(new FileStream(stdinHandle, FileAccess.Write), WriteEncoding) { NewLine = "\n", AutoFlush = true };
         using var toolStdout = new StreamReader(new FileStream(stdoutHandle, FileAccess.Read), Encoding.UTF8);
 
-        var pumpFromTool = new Thread(() => PumpToolOutput(toolStdout)) { IsBackground = true };
-        pumpFromTool.Start();
+        using var toolEnded = new ManualResetEventSlim(initialState: false);
+        using var clientEnded = new ManualResetEventSlim(initialState: false);
 
-        PumpOurInput(input ?? Console.In, toolStdin);
+        void PumpFromTool()
+        {
+            try
+            {
+                PumpToolOutput(toolStdout);
+            }
+            finally
+            {
+                toolEnded.Set();
+            }
+        }
 
-        toolStdin.Close();
-        pumpFromTool.Join(TimeSpan.FromSeconds(5));
+        void PumpFromClient()
+        {
+            try
+            {
+                PumpOurInput(input ?? Console.In, toolStdin);
+            }
+            catch (IOException)
+            {
+                // The tool's stdin pipe broke because the tool is gone; PumpFromTool reports that.
+            }
+            finally
+            {
+                clientEnded.Set();
+            }
+        }
+
+        new Thread(PumpFromTool) { IsBackground = true }.Start();
+        new Thread(PumpFromClient) { IsBackground = true }.Start();
+
+        WaitHandle.WaitAny([toolEnded.WaitHandle, clientEnded.WaitHandle]);
+
+        // Checked in this order on purpose: a normal disconnect also makes the tool end (it sees EOF),
+        // so "both set" must count as the client having left first, not as the tool vanishing.
+        if (clientEnded.IsSet)
+        {
+            toolStdin.Close();
+            toolEnded.Wait(DrainTimeout);
+            return ExitClientDisconnected;
+        }
+
+        Logger.Warning("desk: the tool's output closed before the client disconnected; the tool is gone, exiting.", Category);
+        return ExitToolGone;
     }
 
     private static void PumpOurInput(TextReader source, StreamWriter destination)

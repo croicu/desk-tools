@@ -402,10 +402,10 @@ only actually fires if someone deliberately overrides to a different RID.
 `src/Secrets/` (`Secrets.dll`, namespace `Croicu.Desk.Tools.Secrets`, [issue #50](https://github.com/croicu/desk-tools/issues/50)):
 reads credentials out of the user's KeePassXC database so an elevated MCP tool can use a secret
 without any value reaching a medium-integrity process. References `Base.csproj` only; types are
-`internal`. **Slice 1 (retrieval core) only** -- nothing in `src/Service` uses it yet, and
-`Service.csproj` does not reference it until the wiring slice (the design, including the elevated
-password prompt, file picker, `<McpSecret>` declarations and `ToolLauncher` delivery via environment
-variables, is in the issue).
+`internal`. **Slices 1-2 only (retrieval core and the master-password prompt)** -- nothing in
+`src/Service` uses it yet, and `Service.csproj` does not reference it until the wiring slice (the
+design, including the file picker, `<McpSecret>` declarations and `ToolLauncher` delivery via
+environment variables, is in the issue).
 
 - `Vault.Read(entry, keys)`: the broker. Asks an injected `IPasswordSource` for the master password
   (up to three attempts, telling the source when one is rejected), has `KeePassCli` read the entry's
@@ -427,12 +427,34 @@ variables, is in the issue).
 ` or `
 `, exact
   case-sensitive key); a missing, duplicated, or empty key is an error.
+- `PromptedPassword` (`IPasswordSource`, issue #53): asks an `IPasswordPrompt` for the master
+  password and **holds** it (pinned bytes) until Service exits (`Dispose`) -- no TTL of its own.
+  Callers get copies; `Rejected()` drops it so the next attempt prompts again (a held password that
+  stopped working re-prompts rather than failing); a cancel/timeout clears it and returns null; it is
+  only reused for the same database; one dialog at a time (a concurrent second caller waits, then
+  reuses the answer).
+- `Platform/{Windows,Linux,Neutral}/PasswordPrompt.cs` (`IPasswordPrompt`): Windows shows a modal,
+  topmost dialog through P/Invoke `DialogBoxIndirectParam` over an in-memory template
+  (`Platform/Windows/DialogTemplate.cs`, unit-tested by walking the byte layout) -- no WinForms/WPF.
+  It shows the database path and "attempt N of 3", masks the edit box (`ES_PASSWORD`), closes itself
+  after a timeout (default 2 minutes, a `WM_TIMER`), and runs on its own STA thread. The password goes
+  into pinned `char[]`/`byte[]` buffers (never a `string`), the char buffer is zeroed and the edit box
+  cleared before it closes. Because Service is elevated, so is the window: a medium-integrity process
+  can't script it or read the box (UIPI). Not DPI-aware, English only. Linux/Neutral throw `AppError`
+  (#51). The Windows tests drive the real dialog by sending it messages, tagged `Integration` and
+  not parallelized.
 - `IProcessRunner`/`ProcessResult`/`ProcessRunner` live in **`src/Base`** (`Interfaces.cs` /
   `ProcessRunner.cs`), not here -- nothing about running a program is KeePass-specific, and
   `src/Secrets` consumes them as an ordinary reference. `ProcessRunner` reads stdout as raw bytes
   into pinned buffers zeroed as they are outgrown, never through a `StreamReader`, so a caller can
   zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
   `string` where it must, in the launched tool's environment block.
+- `tests/Apps/Secrets` (`Secrets.App`, not shipped): a manual command-line driver. `Secrets.App
+  [databasePath] [entry] [key]` (all optional; defaults to the dummy database, `ntfy`, `desk-pager`)
+  shows the real password dialog, reads the secret through the whole stack, and prints it -- on
+  purpose, so it is for the dummy database. Meant to be set as the startup project in Visual Studio
+  to step through the dialog, retries, CLI call and parsing; it reaches the `internal` Secrets types
+  through an `InternalsVisibleTo`. Windows only (exits 2 elsewhere).
 - Tests: `tests/Secrets/Unit/` (offline, fakes) and `tests/Secrets/Integration/`
   (`[TestCategory("Integration")]`, real `keepassxc-cli` against the dummy
   `tests/Secrets/data/Secrets.kdbx`, master password `password`; Inconclusive when KeePassXC isn't

@@ -24,7 +24,13 @@ namespace Croicu.Desk.Tools.Desk;
 internal static class ServiceLauncher
 {
     private const string ScheduledTaskName = "Desk Tools Service";
-    private static readonly TimeSpan DefaultStartupWait = TimeSpan.FromSeconds(10);
+    // Generous on purpose: a cold first start (freshly built binaries reached through the .dev
+    // junction, after a long idle spell) was observed taking ~29s from the Service stub starting to
+    // the dev Service actually listening. A 10s wait made several `desk mcp <name>` processes started
+    // together at session start give up and exit, which Claude Code reports as a bare
+    // CONNECTION_CLOSED. A warm start still returns on the first successful poll, so the extra
+    // headroom costs nothing normally.
+    private static readonly TimeSpan DefaultStartupWait = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(200);
 
     /// <summary>

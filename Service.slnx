@@ -14,6 +14,9 @@
     <Project Path="tests/Secrets/Secrets.Tests.csproj" />
     <Project Path="tests/Service/Service.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Apps/">
+    <Project Path="tests/Apps/Secrets/Secrets.App.csproj" />
+  </Folder>
   <Folder Name="/scripts/">
     <Project Path="scripts/Scripts.csproj" />
   </Folder>
