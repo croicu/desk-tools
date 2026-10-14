@@ -245,6 +245,17 @@ assembly's own output folder (a different directory than Service's, so it walks 
 and back down); this always goes through the scheduled task instead, and never needs to resolve
 `Service.dll`'s path itself at all.
 
+`src/Base/Base.csproj`'s `ShutdownDevMcpServers` target ([issue #55](https://github.com/croicu/desk-tools/issues/55)):
+runs once per build (every other `src/` project references Base, so it builds first), `BeforeBuild`,
+and shuts the repo's own running MCP servers down so they can't lock `out\`: when a `Service.exe`
+process is running it runs the installed `Desk.exe shutdown` -- Service stops, its tools exit (the
+parent watchdog, #45), and their `desk mcp` proxies exit (#54), so one command releases every lock;
+MSBuild's own copy retry covers the brief lag. Inert unless there is something to stop: Windows only,
+not on CI (`CI=true`), not with `DESK_TOOLS_SKIP_SHUTDOWN=1`, only when the machine-wide
+`Desk Tools\Desk.exe` exists, and only when a `Service.exe` is running (so a build with nothing to
+stop doesn't make Desk fail on connect). Never fails the build. The cost is that the MCP servers show
+as disconnected afterward (reconnect with `/mcp`).
+
 `src/Directory.Build.targets`'s `GenerateMcpRegistryEntry` target (see `docs/PROTOCOL.md`'s MCP
 tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/29)): a first,
 deliberately small step toward CLAUDE.md's own Mission ("a service for running MCP servers... at a

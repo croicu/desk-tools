@@ -6,4 +6,36 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Shut the project's own MCP servers down before every build (issue #55). While Claude Code has
+       them connected, `desk mcp <name>` proxies run Desk.exe from out\ (through the .dev junction)
+       and Service runs Base.dll/Service.dll from there, so the build's copy into out\ fails with
+       MSB3021/MSB3027. One `Desk.exe shutdown` releases everything: Service stops, its tools exit
+       (the parent watchdog, issue #45), and their proxies exit (issue #54). MSBuild's own copy
+       retry (10 x 1s) covers the brief lag.
+
+       Lives in Base.csproj because every other src/ project references it, so it builds first and
+       this runs once per build - BeforeBuild, so also when Base itself is up to date.
+
+       Deliberately inert unless there is something to stop: Windows only; not on CI (CI=true, which
+       GitHub Actions sets); opt out with DESK_TOOLS_SKIP_SHUTDOWN=1; only when the installed
+       Desk.exe exists (an explicit machine-wide path, not PATH - see PowerShell's `desk` -> desk.cpl
+       trap); and only when a Service.exe process is actually running, so a build with nothing to stop
+       doesn't make Desk fail on connect (with settings.debug on, that is an unhandled exception).
+       Never fails the build. Cost: the MCP servers show as disconnected afterward - reconnect with
+       /mcp. With no .dev junction linked, this stops the installed Service (it auto-starts again on
+       the next desk call). -->
+  <Target Name="ShutdownDevMcpServers" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT' And '$(CI)' != 'true' And '$(DESK_TOOLS_SKIP_SHUTDOWN)' != '1'">
+    <PropertyGroup>
+      <DeskToolsExe>$(ProgramW6432)\Desk Tools\Desk.exe</DeskToolsExe>
+    </PropertyGroup>
+
+    <Exec Condition="Exists('$(DeskToolsExe)')" Command="tasklist /NH /FI &quot;IMAGENAME eq Service.exe&quot;" ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="DeskServiceTasklist" />
+    </Exec>
+
+    <Message Condition="'$(DeskServiceTasklist)' != '' And $(DeskServiceTasklist.Contains('Service.exe'))" Importance="high" Text="Shutting down Desk Tools Service and its MCP servers before building (set DESK_TOOLS_SKIP_SHUTDOWN=1 to skip); reconnect them afterward with /mcp." />
+
+    <Exec Condition="'$(DeskServiceTasklist)' != '' And $(DeskServiceTasklist.Contains('Service.exe'))" Command="&quot;$(DeskToolsExe)&quot; shutdown" Timeout="30000" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low" />
+  </Target>
+
 </Project>

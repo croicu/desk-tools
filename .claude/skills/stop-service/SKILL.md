@@ -12,3 +12,7 @@ exit with it. It never auto-starts Service.
 
 If it fails ("could not connect to the service on port ..."; with `debug: true` this surfaces as an
 unhandled-exception trace), Service isn't running, so the lock has some other cause -- ask the user.
+
+You normally don't need this before a build: `dotnet build` already shuts Service and its MCP servers
+down first (the `ShutdownDevMcpServers` target in `src/Base/Base.csproj`; opt out with
+`DESK_TOOLS_SKIP_SHUTDOWN=1`). Use this skill when you want it stopped without building.
