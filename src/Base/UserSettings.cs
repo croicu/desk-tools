@@ -28,6 +28,14 @@ public static class UserSettings
 
     private const string Category = DiagnosticsCategories.Settings;
 
+    // Moving the temp file over the real one can fail transiently on Windows (ACCESS_DENIED / a
+    // sharing violation) while another process -- antivirus, the search indexer, a cloud-sync client --
+    // briefly has the destination open. That is not a real failure of a settings write, so retry for
+    // about half a second before giving up. Found by a test that intermittently failed with
+    // UnauthorizedAccessException.
+    private const int MoveAttempts = 10;
+    private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(50);
+
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
     /// <summary>
@@ -108,13 +116,30 @@ public static class UserSettings
         try
         {
             File.WriteAllText(temporaryPath, root.ToJsonString(WriteOptions));
-            File.Move(temporaryPath, filePath, overwrite: true);
+            MoveIntoPlace(temporaryPath, filePath);
         }
         finally
         {
             if (File.Exists(temporaryPath))
             {
                 File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static void MoveIntoPlace(string temporaryPath, string filePath)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temporaryPath, filePath, overwrite: true);
+                return;
+            }
+            catch (Exception error) when ((error is IOException or UnauthorizedAccessException) && attempt < MoveAttempts)
+            {
+                Logger.Diagnostic($"per-user settings: '{filePath}' is busy (attempt {attempt} of {MoveAttempts}): {error.Message}", Category);
+                Thread.Sleep(MoveRetryDelay);
             }
         }
     }

@@ -227,6 +227,25 @@ public sealed class UserSettingsTests
     }
 
     [TestMethod]
+    public void Set_DestinationBrieflyHeldOpenByAnotherProcess_RetriesAndSucceeds()
+    {
+        // Antivirus/indexers briefly open the destination without FILE_SHARE_DELETE (readers are fine, a replace is not), so the
+        // final move fails with ACCESS_DENIED on Windows. Simulate that for ~200ms.
+        var dir = NewDir();
+        var user = Write(dir, "user.json", "{}");
+        var held = new FileStream(user, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        void WriteWhileHeld() => UserSettings.Set("secrets", "databasePath", "D:/data.txt", user);
+
+        var writing = Task.Run(WriteWhileHeld);
+        Thread.Sleep(200);
+        held.Dispose();
+
+        Assert.IsTrue(writing.Wait(TimeSpan.FromSeconds(10)), "the write never completed.");
+        Assert.AreEqual("D:/data.txt", ReadSection("secrets", dir, user: user)["databasePath"].GetString());
+    }
+
+    [TestMethod]
     public void DefaultPath_IsDeskToolsSettingsUnderLocalApplicationData()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
