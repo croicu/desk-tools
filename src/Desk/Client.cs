@@ -94,7 +94,16 @@ internal sealed class Client
         }
         catch (SocketException error)
         {
-            throw new AppError($"could not connect to the service on port {Port}: {error.Message}", Category);
+            var message = $"could not connect to the service on port {Port}: {error.Message}";
+
+            // Refused means nothing is listening: Service is not running. Anything else (a timeout, no route) is
+            // a genuine failure.
+            if (error.SocketErrorCode == SocketError.ConnectionRefused)
+            {
+                throw new ServiceNotRunningError(message, Category);
+            }
+
+            throw new AppError(message, Category);
         }
 
         using var stream = client.GetStream();

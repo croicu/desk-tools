@@ -148,7 +148,11 @@ Three methods today:
   start of a freshly built Service has been seen taking about 30).
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
   running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
-  prints a fixed confirmation rather than the raw JSON-RPC result.
+  prints a fixed confirmation rather than the raw JSON-RPC result. **If Service is not running** (the
+  connection is refused) there is nothing to shut down, which is the state asked for, so it prints "The
+  service is not running; nothing to shut down." and **exits 0** -- not an error, and no stack trace even
+  with `debug` on ([issue #80](https://github.com/croicu/desk-tools/issues/80)). Any other failure (the
+  connection breaking mid-request, say) is still an error with exit code 1.
 - `desk mcp <name>` -- sends an `mcp` request (same auto-start-on-failure retry as `ping`), opens
   the two duplicated handles the result returns, then bridges this process's own stdin/stdout to
   them (`src/Desk/McpProxy.cs`, see `docs/ARCHITECTURE.md`'s own entry) until its own stdin reaches

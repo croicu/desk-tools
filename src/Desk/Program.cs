@@ -81,9 +81,7 @@ public static class Program
                 Logger.Print(PingWithAutoStart(client));
                 break;
             case DeskCommand.Shutdown:
-                client.Send(ShutdownMethod);
-                Logger.Print("Shutdown requested.");
-                break;
+                return Shutdown(client);
             case DeskCommand.Mcp:
                 // Service needs a fully qualified path (it has a different working directory).
                 var registryDir = arguments.RegistryDir is null ? null : Path.GetFullPath(arguments.RegistryDir);
@@ -95,6 +93,27 @@ public static class Program
                 throw new ArgumentOutOfRangeException(nameof(arguments), arguments.Command, "Unhandled DeskCommand.");
         }
 
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>desk shutdown</c>. A Service that is not running is not a failure -- there is nothing to shut down, which
+    /// is exactly the state asked for -- so it is reported plainly and exits 0, instead of surfacing as an error
+    /// (and, with <c>debug</c> on, a stack trace). Any other failure is still an error.
+    /// </summary>
+    internal static int Shutdown(Client client)
+    {
+        try
+        {
+            client.Send(ShutdownMethod);
+        }
+        catch (ServiceNotRunningError)
+        {
+            Logger.Print("The service is not running; nothing to shut down.");
+            return 0;
+        }
+
+        Logger.Print("Shutdown requested.");
         return 0;
     }
 
