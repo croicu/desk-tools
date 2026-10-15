@@ -61,25 +61,48 @@
        project's own PublishAppForSetup remarks). "env" is always {} for now, nothing needs a
        per-tool env var yet. Deliberately just the generation side for now: no consumer reads this
        yet. -->
-  <Target Name="GenerateMcpRegistryEntry" AfterTargets="Build" Condition="'$(McpToolName)' != ''">
+  <!-- Secret declarations (issue #50): a tool lists each secret it uses as an item in its own project,
+       <McpSecret Include="NTFY_TOPIC" Entry="ntfy" Key="desk-pager" /> - Include is the environment
+       variable the value will arrive in, Entry the KeePass entry (full group path), Key the "key: value"
+       line in that entry's Notes. This target renders them into the registry fragment as an optional
+       "secrets" array, spliced in just before the closing brace via $(McpSecretsFragment). A tool with no
+       declarations gets an empty fragment, so its registry file is byte-identical to what it was before
+       this existed. Only declarations: no value is ever read here.
+
+       The fragment is written as raw JSON text, so a declaration with a double quote or backslash in it,
+       or a missing Entry/Key, fails the *build* with a message naming the offending item. That is the
+       right place for it - a developer's own mistake, caught where it is cheapest to fix. (At run time
+       the opposite rule holds: the manifest is optional and Service is a convenience, never a gate, so a
+       bad declaration is skipped with a warning and the tool still starts; see McpToolLauncher.) -->
+  <Target Name="ComputeMcpSecretsFragment" Condition="'$(McpToolName)' != ''">
+    <ItemGroup>
+      <_McpSecretInvalid Include="@(McpSecret)" Condition="'%(McpSecret.Entry)' == '' Or '%(McpSecret.Key)' == '' Or $([System.String]::new('%(McpSecret.Identity)%(McpSecret.Entry)%(McpSecret.Key)').Contains('&quot;')) Or $([System.String]::new('%(McpSecret.Identity)%(McpSecret.Entry)%(McpSecret.Key)').Contains('\'))" />
+    </ItemGroup>
+    <Error Condition="'@(_McpSecretInvalid)' != ''" Text="Invalid McpSecret item(s) in $(MSBuildProjectName): @(_McpSecretInvalid). Each needs non-empty Entry and Key metadata, and no value may contain a double quote or a backslash." />
+    <PropertyGroup>
+      <McpSecretsFragment Condition="'@(McpSecret)' != ''">, &quot;secrets&quot;: [@(McpSecret->'{&quot;env&quot;: &quot;%(Identity)&quot;, &quot;entry&quot;: &quot;%(Entry)&quot;, &quot;key&quot;: &quot;%(Key)&quot;}', ', ')]</McpSecretsFragment>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="GenerateMcpRegistryEntry" AfterTargets="Build" DependsOnTargets="ComputeMcpSecretsFragment" Condition="'$(McpToolName)' != ''">
     <PropertyGroup>
       <McpRegistryDir>$(OutDir)mcp-registry\</McpRegistryDir>
     </PropertyGroup>
     <MakeDir Directories="$(McpRegistryDir)" />
     <WriteLinesToFile
         File="$(McpRegistryDir)$(McpToolName).json"
-        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}$(McpSecretsFragment)}"
         Overwrite="true" />
   </Target>
 
-  <Target Name="GenerateMcpRegistryEntryForPublish" AfterTargets="Publish" Condition="'$(McpToolName)' != ''">
+  <Target Name="GenerateMcpRegistryEntryForPublish" AfterTargets="Publish" DependsOnTargets="ComputeMcpSecretsFragment" Condition="'$(McpToolName)' != ''">
     <PropertyGroup>
       <McpRegistryPublishDir>$(PublishDir)mcp-registry\</McpRegistryPublishDir>
     </PropertyGroup>
     <MakeDir Directories="$(McpRegistryPublishDir)" />
     <WriteLinesToFile
         File="$(McpRegistryPublishDir)$(McpToolName).json"
-        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;$(McpToolName)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;dotnet&quot;, &quot;args&quot;: [&quot;$(TargetFileName)&quot;], &quot;env&quot;: {}$(McpSecretsFragment)}"
         Overwrite="true" />
   </Target>
 

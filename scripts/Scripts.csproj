@@ -42,19 +42,51 @@
        registry was always meant to have). Batched via Inputs/Outputs over @(McpPythonTool) so this
        runs once per tool, one file each, same "avoid a race between tools writing one combined
        file" reasoning as the .NET-side targets. -->
-  <Target Name="GeneratePythonMcpRegistryEntries" AfterTargets="Build" Inputs="@(McpPythonTool)" Outputs="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json">
+  <!-- Secret declarations for Python tools (issue #50). Same <McpSecret> item as a .NET tool declares in its
+       own project (see src/Directory.Build.targets' ComputeMcpSecretsFragment for the full explanation), but
+       this one project covers every Python tool, so each item names its tool: <McpSecret Include="NTFY_TOPIC"
+       Tool="pager" Entry="ntfy" Key="desk-pager" />. The generate targets below render the items whose Tool
+       matches the tool being written into that tool's optional "secrets" array; a tool with none gets a
+       fragment byte-identical to what it was before this existed.
+
+       Validated at build time (the fragment is raw JSON text, and a developer's own typo is cheapest to catch
+       here): Entry, Key and Tool must be non-empty, Tool must name an <McpPythonTool> that exists (a typo'd
+       name would otherwise silently declare nothing), and no value may contain a double quote or a backslash.
+       At run time the opposite rule holds - the manifest is optional and Service is a convenience, never a
+       gate - see docs/ARCHITECTURE.md's invariants for MCP tools. -->
+  <Target Name="ValidateMcpPythonSecrets">
+    <PropertyGroup>
+      <_McpPythonToolList>;@(McpPythonTool);</_McpPythonToolList>
+    </PropertyGroup>
+    <ItemGroup>
+      <_McpSecretInvalid Include="@(McpSecret)" Condition="'%(McpSecret.Entry)' == '' Or '%(McpSecret.Key)' == '' Or '%(McpSecret.Tool)' == '' Or !$(_McpPythonToolList.Contains(';%(McpSecret.Tool);')) Or $([System.String]::new('%(McpSecret.Identity)%(McpSecret.Entry)%(McpSecret.Key)%(McpSecret.Tool)').Contains('&quot;')) Or $([System.String]::new('%(McpSecret.Identity)%(McpSecret.Entry)%(McpSecret.Key)%(McpSecret.Tool)').Contains('\'))" />
+    </ItemGroup>
+    <Error Condition="'@(_McpSecretInvalid)' != ''" Text="Invalid McpSecret item(s) in scripts/Scripts.csproj: @(_McpSecretInvalid). Each needs non-empty Entry, Key and Tool metadata, Tool must name an McpPythonTool, and no value may contain a double quote or a backslash." />
+  </Target>
+
+  <Target Name="GeneratePythonMcpRegistryEntries" AfterTargets="Build" DependsOnTargets="ValidateMcpPythonSecrets" Inputs="@(McpPythonTool)" Outputs="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json">
     <MakeDir Directories="$(OutDir)mcp-registry\" />
+    <PropertyGroup>
+      <_McpToolBucket>%(McpPythonTool.Identity)</_McpToolBucket>
+      <McpSecretsFragment></McpSecretsFragment>
+      <McpSecretsFragment Condition="'@(McpSecret->WithMetadataValue('Tool', '$(_McpToolBucket)'))' != ''">, &quot;secrets&quot;: [@(McpSecret->WithMetadataValue('Tool', '$(_McpToolBucket)')->'{&quot;env&quot;: &quot;%(Identity)&quot;, &quot;entry&quot;: &quot;%(Entry)&quot;, &quot;key&quot;: &quot;%(Key)&quot;}', ', ')]</McpSecretsFragment>
+    </PropertyGroup>
     <WriteLinesToFile
         File="$(OutDir)mcp-registry\%(McpPythonTool.Identity).json"
-        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}$(McpSecretsFragment)}"
         Overwrite="true" />
   </Target>
 
-  <Target Name="GeneratePythonMcpRegistryEntriesForPublish" AfterTargets="Publish" Inputs="@(McpPythonTool)" Outputs="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json">
+  <Target Name="GeneratePythonMcpRegistryEntriesForPublish" AfterTargets="Publish" DependsOnTargets="ValidateMcpPythonSecrets" Inputs="@(McpPythonTool)" Outputs="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json">
     <MakeDir Directories="$(PublishDir)mcp-registry\" />
+    <PropertyGroup>
+      <_McpToolBucket>%(McpPythonTool.Identity)</_McpToolBucket>
+      <McpSecretsFragment></McpSecretsFragment>
+      <McpSecretsFragment Condition="'@(McpSecret->WithMetadataValue('Tool', '$(_McpToolBucket)'))' != ''">, &quot;secrets&quot;: [@(McpSecret->WithMetadataValue('Tool', '$(_McpToolBucket)')->'{&quot;env&quot;: &quot;%(Identity)&quot;, &quot;entry&quot;: &quot;%(Entry)&quot;, &quot;key&quot;: &quot;%(Key)&quot;}', ', ')]</McpSecretsFragment>
+    </PropertyGroup>
     <WriteLinesToFile
         File="$(PublishDir)mcp-registry\%(McpPythonTool.Identity).json"
-        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}}"
+        Lines="{&quot;name&quot;: &quot;%(McpPythonTool.Identity)&quot;, &quot;type&quot;: &quot;stdio&quot;, &quot;command&quot;: &quot;python&quot;, &quot;args&quot;: [&quot;scripts/%(McpPythonTool.Identity).py&quot;], &quot;env&quot;: {}$(McpSecretsFragment)}"
         Overwrite="true" />
   </Target>
 
