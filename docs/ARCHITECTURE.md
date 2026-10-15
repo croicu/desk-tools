@@ -35,8 +35,8 @@ capabilities are expected to keep to them.
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
      Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
      minimal stdio MCP server, references Base.csproj), src/Pager/ (the ntfy pager MCP tool,
-     references Base.csproj only), src/Desk/ (a console client for
-     src/Service's Host, references Base.csproj), src/Secrets/ (KeePass-backed secret retrieval,
+     references Base.csproj only), src/Launcher/ (everything that talks to Service: client, starter, tool
+     connection; references Base.csproj), src/Desk/ (a thin command-line wrapper over Launcher), src/Secrets/ (KeePass-backed secret retrieval,
      references Base.csproj), and scripts/ (standalone Python utilities outside
      the .NET build entirely): what it owns, what it depends on. -->
 
@@ -231,10 +231,8 @@ loopback listener on `ISettingsProvider.Port` (the same shared settings.json `Ho
 so Desk needs no `ProjectReference` on `Service.csproj` to learn the port), sends one JSON-RPC
 request line, waits for the response, and exits. Requires exactly one bare subcommand
 (`DeskCommand`, a verb -- not a `--`-prefixed flag, since they're mutually exclusive): `ping`
-sends a `ping` request and prints its result (`"pong"`) via `Logger.Print`; `shutdown` sends a
-`Host.ShutdownMethod` request (kept in sync by hand as its own literal, since Desk deliberately has
-no `ProjectReference` on `Service.csproj` to reference the real constant) and prints a fixed
-confirmation instead of the raw JSON-RPC result; `mcp <name>` (see
+sends a `ping` request and prints its result (`"pong"`) via `Logger.Print`; `shutdown` asks Service to shut down (the Launcher's `Client.Shutdown`) and prints a fixed
+confirmation -- or, if Service is not running, says so and exits 0; `mcp <name>` (see
 [issue #33](https://github.com/croicu/desk-tools/issues/33)) launches the named tool and bridges
 this process's own stdio to it -- see `McpProxy` below. `Start` forwards the parsed
 `CliArguments` into `Run` via a trivial forwarding lambda (`() => Run(arguments)`, same pattern
@@ -243,32 +241,40 @@ is a plain `Func<int>`. For `mcp`, `Start` also installs a silent `DiagnosticsLo
 `Context.Start` can install a real, printing one -- once `McpProxy.Run` starts relaying the
 launched tool's own stdout, this process's stdout must carry only that traffic, the same reasoning
 `src/Hello/Program.cs`'s own `Start` already documents for itself (no `ProjectReference` to
-cross-link a real `<see cref>` to it). The actual connect/send/read exchange lives in `Client`
-(`src/Desk/Client.cs`), constructed with an optional port override (same pattern as `Host`'s own
-constructor) so a test can point it at a test-local peer instead of the real settings-resolved
-port -- `Client.Send` has no notion of "ping" vs "shutdown", it only ever sends a method name with
-no params and returns the string result; a separate `Client.LaunchMcpTool` method exists
-specifically for `mcp`'s own richer contract (params, and a structured `{"stdin", "stdout"}`
-result) rather than generalizing `Send` prematurely. A closed connection, a JSON-RPC error
-response, or a failure to connect all raise a plain `AppError`, surfaced through the same
-`AppError`-to-exit-code-1
-handling every other app here already gets from `Context.Start`. `shutdown` stays fail-fast there,
-no retry, no auto-start (shutting down something that isn't running isn't worth auto-starting for);
-`ping` and `mcp` instead fall back to `ServiceLauncher.StartAndWaitUntilReachable`
-(`src/Desk/ServiceLauncher.cs`) on that first failure, then retry once (see
-[issue #27](https://github.com/croicu/desk-tools/issues/27)) -- `mcp`'s own retry also fires on a
-non-reachability `AppError` (e.g. an unregistered tool name), a known, minor imprecision inherited
-from `ping`'s own existing pattern rather than a new one. No `IConsole` concerns of its own (an
+cross-link a real `<see cref>` to it). The actual connect/send/read exchange, starting Service and opening a launched tool's pipes all live in the
+Launcher assembly (`src/Launcher`, see below; [issue #74](https://github.com/croicu/desk-tools/issues/74)): Desk is a
+thin command-line wrapper over it -- argument parsing, console and log setup, and turning the Launcher's answers into
+output and exit codes. `ping` and `mcp` call `Starter.EnsureRunning` first, so a Service that is not running is
+started before the request; `shutdown` never starts it (shutting down something that isn't running isn't worth
+starting it for) and reports `NotRunningError` as "nothing to shut down". Failures are plain `AppError`s, surfaced
+through the same `AppError`-to-exit-code-1 handling every other app here already gets from `Context.Start`. No `IConsole` concerns of its own (an
 ordinary console app, already console-attached), hence its own `VoidConsole`, same reasoning as
 Hello's but for the opposite reason (Hello is headless; Desk is already attached).
+
+`src/Launcher/` (`Launcher.dll`, namespace `Croicu.Desk.Tools.Service.Launcher`,
+[issue #74](https://github.com/croicu/desk-tools/issues/74)): everything that talks to Service, so anything that needs
+a running Service -- `src/Desk`, the test apps -- shares it instead of shelling out to `Desk.exe`. References `Base`
+only; Desk and the apps reference it (graph: Desk, apps -> Launcher -> Base). The namespace says "Service", so the
+types do not repeat it. Several small public building blocks, everything else `internal`:
+
+- `Client`: the JSON-RPC calls (`Ping`, `Shutdown`, `IsReachable`, `LaunchTool(name, registryDir?)`), constructed with
+  an optional port override (same pattern as `Host`'s own constructor) so a test can point it at a test-local peer.
+  Fails fast and never retries or starts Service itself. A refused connection (nothing listening) is a
+  `NotRunningError`; a closed connection, a JSON-RPC error, or a connection that breaks mid-request
+  ([issue #78](https://github.com/croicu/desk-tools/issues/78)) is a plain `AppError`.
+- `NotRunningError : AppError`: "Service is not running", distinct from a real failure.
+- `Starter`: runs the installed scheduled task (see below) and waits until Service answers; `EnsureRunning(client)` is
+  the sequence every caller needs -- ping, and only on a `NotRunningError` start Service and wait (any other failure of
+  the ping is not "not running" and is thrown, rather than answered by starting a second Service).
+- `ToolConnection : IDisposable`: a launched tool's stdin/stdout as a `TextWriter` (`Input`) and `TextReader`
+  (`Output`), newline-delimited UTF-8 without a BOM, flushed on every write. Owns the duplicated handles Service handed
+  over; disposing it closes the tool's stdin, which is how the tool learns its client is gone.
 
 `src/Desk/McpProxy.cs` (issue #33): bridges this process's own stdin/stdout to a tool Service
 already launched and handed direct pipe access to via `mcp`'s `DuplicateHandle`-based handoff (see
 `Host`'s own `mcp` entry above) -- what makes `desk mcp <name>` usable as a real `.mcp.json`
-`command` entry pointing at Desk instead of the tool's own executable directly. Opens the two
-duplicated handle values as a `SafeFileHandle`/`FileStream` pair each (same construction the
-original throwaway spike and `tests/Service/Integration/HelloTests.cs`'s own `mcp` test already
-use), then pumps lines in both directions: one background thread reads the tool's stdout and
+`command` entry pointing at Desk instead of the tool's own executable directly. Takes the launched tool as a
+`ToolConnection` (the Launcher opened the duplicated handles), then pumps lines in both directions: one background thread reads the tool's stdout and
 writes each line via `Logger.Print` (not raw `Console.Write*`, per CLAUDE.md's "Console.* is
 confined to src/Base/Sinks" rule -- `Program.Start`'s silent sink means nothing else ever reaches
 real stdout while this runs), while the main thread reads this process's own stdin (injectable for
@@ -280,10 +286,10 @@ finish draining before returning. Desk itself never parses the relayed traffic, 
 relay -- same "no SDK, hand-roll the transport" approach the rest of this repo's MCP surface
 already takes.
 
-`src/Desk/ServiceLauncher.cs`: runs the installed scheduled task (`schtasks /run /tn "Desk Tools
+`src/Launcher/Starter.cs`: runs the installed scheduled task (`schtasks /run /tn "Desk Tools
 Service"`) rather than launching `Service.dll` as a plain child process -- `Host` is meant to run at
 the scheduled task's own elevated integrity level (`installer/Package.wxs`'s `/rl highest`), and a
-plain `Process.Start` from Desk would instead run it at Desk's own (typically lower) integrity,
+plain `Process.Start` from the caller would instead run it at the caller's own (typically lower) integrity,
 defeating that. `schtasks /run` itself needs no elevation from the caller; Task Scheduler runs the
 task under its own configured principal regardless. `schtasks`' own output is captured, never inherited: for
 `desk mcp` Desk's stdout is the MCP protocol stream, and its "SUCCESS: Attempted to run..." line would otherwise
@@ -583,8 +589,8 @@ finding the database so two launches never open two file pickers. Its parameterl
   into pinned buffers zeroed as they are outgrown, never through a `StreamReader`, so a caller can
   zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
   `string` where it must, in the launched tool's environment block.
-- `tests/Apps/Pager` (`Pager.App`, not shipped; [issue #76](https://github.com/croicu/desk-tools/issues/76)): runs
-  `desk mcp pager` and speaks MCP to it -- `initialize`, `tools/list`, and with `--send` one `page` call. Without
+- `tests/Apps/Pager` (`Pager.App`, not shipped; [issue #76](https://github.com/croicu/desk-tools/issues/76)): launches
+  the `pager` tool through the Launcher (in-process: no `Desk.exe`) and speaks MCP to it -- `initialize`, `tools/list`, and with `--send` one `page` call. Without
   `--send` nothing is sent. **`--send` sends a real notification** to the topic in KeePass `ntfy`/`desk-pager`; with
   the dummy database that is the all-zero GUID on ntfy.sh, public and guessable. To test without the internet, set
   `NTFY_SERVER` to a local listener in Service's environment before starting it (a tool inherits Service's
@@ -593,11 +599,11 @@ finding the database so two launches never open two file pickers. Its parameterl
 - `tests/Apps/McpSecrets` (`McpSecrets.App`, not shipped; [issue #73](https://github.com/croicu/desk-tools/issues/73)):
   checks secret delivery end to end through the real chain. It writes a throwaway registry holding an
   `echo-secret` tool that declares one secret (`scripts/echo-secret.py`: a plain stdio script that answers each
-  line with `PROBE_SECRET=<value>` -- not an MCP server; Service neither knows nor cares what it launches), runs
-  `desk mcp echo-secret --registry <dir>` (the per-call registry, issue #69), sends it a line and prints the
-  answer, exit code 0 if the secret arrived. Needs `settings.allowCallerRegistry` on, `python`, KeePassXC and a
+  line with `PROBE_SECRET=<value>` -- not an MCP server; Service neither knows nor cares what it launches), launches
+  it through the Launcher from that registry (the per-call registry, issue #69; in-process, no `Desk.exe`), sends it a
+  line and prints the answer, exit code 0 if the secret arrived. Needs `settings.allowCallerRegistry` on, `python`, KeePassXC and a
   database holding `ntfy`/`desk-pager` (the dummy one: `tests/data/Secrets.kdbx`, master password
-  `password`; pick it in the file dialog when none is configured). Options: `--desk`, `--entry`, `--key`,
+  `password`; pick it in the file dialog when none is configured). Options: `--entry`, `--key`,
   `--expect`, `--timeout` (default 300s: the password dialog never times out). The dialog is Service's own, which
   the installed scheduled task runs elevated -- type the password yourself; a script cannot (UIPI).
 - `tests/Apps/Secrets` (`Secrets.App`, not shipped): a manual command-line driver. `Secrets.App

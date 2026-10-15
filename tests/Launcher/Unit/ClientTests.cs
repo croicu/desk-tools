@@ -4,7 +4,7 @@ using System.Text;
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Mocks;
 
-namespace Croicu.Desk.Tools.Desk.Tests.Unit;
+namespace Croicu.Desk.Tools.Service.Launcher.Tests.Unit;
 
 /// <summary>
 /// Exercises <see cref="Client"/> against a hand-rolled peer (a bare <see cref="TcpListener"/> that
@@ -110,13 +110,17 @@ public sealed class ClientTests
         var client = new Client(new TestSettings(), port: port);
 
         // Refused (nothing listening) is its own type -- Service is simply not running -- but still an AppError.
-        var error = Assert.ThrowsExactly<ServiceNotRunningError>(() => client.Send("ping"));
+        var error = Assert.ThrowsExactly<NotRunningError>(() => client.Send("ping"));
         Assert.IsInstanceOfType<AppError>(error);
     }
 
     [TestMethod]
-    public void LaunchMcpTool_ReturnsHandlesFromResult_AndSendsNameAndOwnProcessId()
+    public void LaunchTool_OpensTheHandlesFromTheResult_AsAConnectionToTheTool_AndSendsNameAndOwnProcessId()
     {
+        // Real pipes stand in for the tool's stdio; Service's handoff would have duplicated their handle values
+        // into this process, and the reply carries those values as text.
+        using var pipes = new FakeToolPipes();
+
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -130,17 +134,21 @@ public sealed class ClientTests
             using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
 
             capturedRequest = reader.ReadLine();
-            writer.WriteLine("""{"jsonrpc": "2.0", "id": 1, "result": {"stdin": "684", "stdout": "688"}}""");
+            writer.WriteLine($$$"""{"jsonrpc": "2.0", "id": 1, "result": {"stdin": "{{{pipes.StdinHandle}}}", "stdout": "{{{pipes.StdoutHandle}}}"}}""");
         });
 
         try
         {
             var client = new Client(new TestSettings(), port: port);
-            var (stdin, stdout) = client.LaunchMcpTool("hello");
+            using var tool = client.LaunchTool("hello");
 
             Assert.IsTrue(peerTask.Wait(BoundedWait), "Peer task did not complete within the bounded wait.");
-            Assert.AreEqual(684L, stdin);
-            Assert.AreEqual(688L, stdout);
+
+            // What the caller writes reaches the tool's stdin; what the tool writes comes back out.
+            tool.Input.WriteLine("to-the-tool");
+            Assert.AreEqual("to-the-tool", pipes.ToolStdin.ReadLine());
+            pipes.ToolStdout.WriteLine("from-the-tool");
+            Assert.AreEqual("from-the-tool", tool.Output.ReadLine());
 
             Assert.IsNotNull(capturedRequest);
             StringAssert.Contains(capturedRequest, "\"name\":\"hello\"");
@@ -153,7 +161,24 @@ public sealed class ClientTests
     }
 
     [TestMethod]
-    public void LaunchMcpTool_PeerReturnsJsonRpcError_ThrowsAppError()
+    public void Ping_ReturnsPong()
+    {
+        Assert.AreEqual("pong", ExchangeWithPeer("ping", replyLine: """{"jsonrpc": "2.0", "id": 1, "result": "pong"}""", call: client => client.Ping()));
+    }
+
+    [TestMethod]
+    public void IsReachable_NothingListening_IsFalseAndNeverThrows()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+
+        Assert.IsFalse(new Client(new TestSettings(), port: port).IsReachable());
+    }
+
+    [TestMethod]
+    public void LaunchTool_PeerReturnsJsonRpcError_ThrowsAppError()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -174,7 +199,7 @@ public sealed class ClientTests
         {
             var client = new Client(new TestSettings(), port: port);
 
-            var error = Assert.ThrowsExactly<AppError>(() => client.LaunchMcpTool("no-such-tool"));
+            var error = Assert.ThrowsExactly<AppError>(() => client.LaunchTool("no-such-tool"));
             StringAssert.Contains(error.Message, "no-such-tool");
             Assert.IsTrue(peerTask.Wait(BoundedWait), "Peer task did not complete within the bounded wait.");
         }
@@ -184,7 +209,7 @@ public sealed class ClientTests
         }
     }
 
-    private static string ExchangeWithPeer(string method, string replyLine)
+    private static string ExchangeWithPeer(string method, string replyLine, Func<Client, string>? call = null)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -206,7 +231,7 @@ public sealed class ClientTests
         try
         {
             var client = new Client(new TestSettings(), port: port);
-            var reply = client.Send(method);
+            var reply = call is null ? client.Send(method) : call(client);
 
             Assert.IsTrue(peerTask.Wait(BoundedWait), "Peer task did not complete within the bounded wait.");
             return reply;

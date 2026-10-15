@@ -4,6 +4,7 @@ using System.Text;
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Base.Sinks;
 using Croicu.Desk.Tools.Mocks;
+using Croicu.Desk.Tools.Service.Launcher;
 
 namespace Croicu.Desk.Tools.Desk.Tests.Unit;
 

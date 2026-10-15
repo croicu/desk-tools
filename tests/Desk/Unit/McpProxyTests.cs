@@ -2,12 +2,14 @@ using System.IO.Pipes;
 using System.Text;
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Base.Sinks;
+using Croicu.Desk.Tools.Service.Launcher;
 
 namespace Croicu.Desk.Tools.Desk.Tests.Unit;
 
 /// <summary>
 /// Drives <see cref="McpProxy.Run"/> with anonymous pipes standing in for the tool's stdin/stdout
-/// (the real handles come from Service's DuplicateHandle handoff): the test owns the *other* end of
+/// (a real <see cref="ToolConnection"/> is built over them by the Launcher from Service's DuplicateHandle handoff;
+/// here it is just two streams over the pipes): the test owns the *other* end of
 /// each pipe, so it can feed the tool's output, read what reaches the tool's stdin, and "kill the
 /// tool" by closing its end. Output is captured through a DiagnosticsLog pointed at a private
 /// StringWriter, same technique as Hello's ProgramTests, so nothing touches the real console.
@@ -37,7 +39,7 @@ public sealed class McpProxyTests
     /// <summary>
     /// The two pipe pairs for one proxy run. <see cref="ToolStdin"/> is what the proxy writes to the
     /// tool (the test reads it); <see cref="ToolStdout"/> is what the tool writes (the test writes it).
-    /// The proxy end of each is handed over as a raw handle value and owned by the proxy from then on.
+    /// The proxy end of each is wrapped in <see cref="Connection"/>, which the test disposes.
     /// </summary>
     private sealed class FakeTool : IDisposable
     {
@@ -46,20 +48,18 @@ public sealed class McpProxyTests
 
         public FakeTool()
         {
-            StdinHandle = (long)_stdin.ClientSafePipeHandle.DangerousGetHandle();
-            StdoutHandle = (long)_stdout.ClientSafePipeHandle.DangerousGetHandle();
-
-            // The proxy now owns those client ends; stop this side from also closing them.
-            _stdin.ClientSafePipeHandle.SetHandleAsInvalid();
-            _stdout.ClientSafePipeHandle.SetHandleAsInvalid();
+            var proxyWritesHere = new AnonymousPipeClientStream(PipeDirection.Out, _stdin.ClientSafePipeHandle);
+            var proxyReadsHere = new AnonymousPipeClientStream(PipeDirection.In, _stdout.ClientSafePipeHandle);
+            Connection = new ToolConnection(
+                new StreamWriter(proxyWritesHere, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true },
+                new StreamReader(proxyReadsHere, Encoding.UTF8));
 
             ToolStdin = new StreamReader(_stdin, Encoding.UTF8);
             ToolStdout = new StreamWriter(_stdout, new UTF8Encoding(false)) { NewLine = "\n", AutoFlush = true };
         }
 
-        public long StdinHandle { get; }
-
-        public long StdoutHandle { get; }
+        /// <summary>What <see cref="McpProxy.Run"/> is given: the tool as the proxy side sees it.</summary>
+        public ToolConnection Connection { get; }
 
         public StreamReader ToolStdin { get; }
 
@@ -70,6 +70,7 @@ public sealed class McpProxyTests
 
         public void Dispose()
         {
+            Connection.Dispose();
             ToolStdin.Dispose();
             ToolStdout.Dispose();
         }
@@ -89,7 +90,7 @@ public sealed class McpProxyTests
         using var tool = new FakeTool();
         var client = new BlockingReader();
 
-        int RunProxy() => McpProxy.Run(tool.StdinHandle, tool.StdoutHandle, client);
+        int RunProxy() => McpProxy.Run(tool.Connection, client);
 
         var proxy = Task.Run(RunProxy);
         tool.Die();
@@ -106,7 +107,7 @@ public sealed class McpProxyTests
         CaptureOutput();
         using var tool = new FakeTool();
 
-        int RunProxy() => McpProxy.Run(tool.StdinHandle, tool.StdoutHandle, new StringReader(string.Empty));
+        int RunProxy() => McpProxy.Run(tool.Connection, new StringReader(string.Empty));
 
         var proxy = Task.Run(RunProxy);
 
@@ -124,7 +125,7 @@ public sealed class McpProxyTests
         var output = CaptureOutput();
         using var tool = new FakeTool();
 
-        int RunProxy() => McpProxy.Run(tool.StdinHandle, tool.StdoutHandle, new StringReader("line-from-client\n"));
+        int RunProxy() => McpProxy.Run(tool.Connection, new StringReader("line-from-client\n"));
 
         var proxy = Task.Run(RunProxy);
 

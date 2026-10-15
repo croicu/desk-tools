@@ -1,5 +1,6 @@
 using Croicu.Desk.Tools.Base;
 using Croicu.Desk.Tools.Base.Sinks;
+using Croicu.Desk.Tools.Service.Launcher;
 
 namespace Croicu.Desk.Tools.Desk;
 
@@ -17,13 +18,12 @@ public enum DeskCommand
 }
 
 /// <summary>
-/// Console client for <c>src/Service</c>: connects to <c>Host</c>'s loopback TCP listener, sends one
-/// request line, waits for the reply, prints it, then exits -- see <see cref="Client"/> for the
-/// actual wire exchange and docs/PROTOCOL.md for the format. <c>ping</c> auto-starts the service
-/// (see <see cref="ServiceLauncher"/>) if it isn't reachable, then retries once; <c>shutdown</c>
-/// stays fail-fast, no retry, no auto-start (shutting down something that isn't running isn't an
-/// error worth auto-starting for) -- both failure modes surface via the same
-/// <see cref="AppError"/>-to-exit-code-1 handling every other app in this repo already uses (see
+/// Command-line wrapper over the Launcher assembly (<c>Croicu.Desk.Tools.Service.Launcher</c>, issue #74), which does
+/// the real work of talking to <c>src/Service</c>'s <c>Host</c>: this class only parses arguments, sets up
+/// logging and the console, and turns the Launcher's answers into output and exit codes. <c>ping</c> and <c>mcp</c>
+/// make sure Service is running first (<see cref="Starter.EnsureRunning"/>); <c>shutdown</c> never starts it
+/// (shutting down something that isn't running isn't an error worth auto-starting for). Failures surface via the
+/// same <see cref="AppError"/>-to-exit-code-1 handling every other app in this repo already uses (see
 /// <see cref="Context.Start"/>). <see cref="McpToolName"/> is only ever set alongside
 /// <see cref="DeskCommand.Mcp"/> -- <see cref="Program.ParseArgs"/> requires it as that
 /// subcommand's own positional argument. <see cref="RegistryDir"/> (<c>mcp</c> only, <c>--registry
@@ -34,12 +34,6 @@ public sealed record CliArguments(DeskCommand Command, string? McpToolName = nul
 
 public static class Program
 {
-    // Must match Host.PingMethod/Host.ShutdownMethod/Host.McpMethod -- see those constants' own
-    // remarks on why these are hand-kept-in-sync literals rather than a shared reference (Desk
-    // deliberately has no ProjectReference on Service.csproj).
-    private const string PingMethod = "ping";
-    private const string ShutdownMethod = "shutdown";
-
     // See DevRedirect's own remarks -- must run before anything else Main does. No-op (returns
     // null) unless a ".dev" junction actually exists alongside this exe's own install folder.
     public static int Main(string[] args) => DevRedirect.TryHandoff("Desk.exe", args) ?? Start(args);
@@ -78,17 +72,20 @@ public static class Program
         switch (arguments.Command)
         {
             case DeskCommand.Ping:
-                Logger.Print(PingWithAutoStart(client));
+                Starter.EnsureRunning(client);
+                Logger.Print(client.Ping());
                 break;
             case DeskCommand.Shutdown:
                 return Shutdown(client);
             case DeskCommand.Mcp:
                 // Service needs a fully qualified path (it has a different working directory).
                 var registryDir = arguments.RegistryDir is null ? null : Path.GetFullPath(arguments.RegistryDir);
-                var (stdin, stdout) = LaunchMcpToolWithAutoStart(client, arguments.McpToolName!, registryDir);
-
-                // Non-zero when the tool went away before the client did -- see McpProxy.Run.
-                return McpProxy.Run(stdin, stdout);
+                Starter.EnsureRunning(client);
+                using (var tool = client.LaunchTool(arguments.McpToolName!, registryDir))
+                {
+                    // Non-zero when the tool went away before the client did -- see McpProxy.Run.
+                    return McpProxy.Run(tool);
+                }
             default:
                 throw new ArgumentOutOfRangeException(nameof(arguments), arguments.Command, "Unhandled DeskCommand.");
         }
@@ -105,9 +102,9 @@ public static class Program
     {
         try
         {
-            client.Send(ShutdownMethod);
+            client.Shutdown();
         }
-        catch (ServiceNotRunningError)
+        catch (NotRunningError)
         {
             Logger.Print("The service is not running; nothing to shut down.");
             return 0;
@@ -115,62 +112,6 @@ public static class Program
 
         Logger.Print("Shutdown requested.");
         return 0;
-    }
-
-    /// <summary>
-    /// Tries a normal ping first; only on failure does it fall back to starting the service and
-    /// retrying, rather than always paying the auto-start machinery's cost. The retry after a
-    /// successful auto-start is a plain, un-retried <see cref="Client.Send"/> call -- if the
-    /// service somehow stops being reachable in the brief window between
-    /// <see cref="ServiceLauncher.StartAndWaitUntilReachable"/> confirming it and this final call,
-    /// that's a genuine failure worth surfacing as-is, not silently retried again.
-    /// </summary>
-    private static string PingWithAutoStart(Client client)
-    {
-        try
-        {
-            return client.Send(PingMethod);
-        }
-        catch (AppError)
-        {
-            Logger.Info("desk: service not reachable; attempting to start it.");
-            ServiceLauncher.StartAndWaitUntilReachable(() => TryPing(client));
-            return client.Send(PingMethod);
-        }
-    }
-
-    private static bool TryPing(Client client)
-    {
-        try
-        {
-            client.Send(PingMethod);
-            return true;
-        }
-        catch (AppError)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Same auto-start-on-first-failure shape as <see cref="PingWithAutoStart"/> -- an MCP client
-    /// invoking <c>desk mcp &lt;name&gt;</c> wants this to just work even if Service hasn't been
-    /// started yet. Also retries on a non-reachability <see cref="AppError"/> (e.g. an unregistered
-    /// tool name) the same way <see cref="PingWithAutoStart"/> would for an equivalent case -- a
-    /// known, minor imprecision inherited from that existing pattern rather than a new one.
-    /// </summary>
-    private static (long Stdin, long Stdout) LaunchMcpToolWithAutoStart(Client client, string name, string? registryDir)
-    {
-        try
-        {
-            return client.LaunchMcpTool(name, registryDir);
-        }
-        catch (AppError)
-        {
-            Logger.Info("desk: service not reachable; attempting to start it.");
-            ServiceLauncher.StartAndWaitUntilReachable(() => TryPing(client));
-            return client.LaunchMcpTool(name, registryDir);
-        }
     }
 
     /// <summary>

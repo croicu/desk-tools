@@ -1,6 +1,5 @@
-using System.Text;
 using Croicu.Desk.Tools.Base;
-using Microsoft.Win32.SafeHandles;
+using Croicu.Desk.Tools.Service.Launcher;
 
 namespace Croicu.Desk.Tools.Desk;
 
@@ -25,15 +24,11 @@ internal static class McpProxy
 
     private const string Category = "desk";
 
-    // No BOM: same reasoning as Host.WriteEncoding/Client.WriteEncoding -- the tool's own stdin
-    // reader expects plain UTF-8 JSON-RPC text with no preamble.
-    private static readonly UTF8Encoding WriteEncoding = new(encoderShouldEmitUTF8Identifier: false);
-
     private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Opens the two duplicated pipe handles <see cref="Client.LaunchMcpTool"/> returned and pumps
-    /// lines between them and <paramref name="input"/> (defaults to <see cref="Console.In"/>) /
+    /// Pumps lines between the launched tool (<paramref name="tool"/>, from <see cref="Client.LaunchTool"/>) and
+    /// <paramref name="input"/> (defaults to <see cref="Console.In"/>) /
     /// this process's own stdout (via <see cref="Logger.Print"/>, per CLAUDE.md's "Console.* is
     /// confined to src/Base/Sinks" rule -- <see cref="Program.Start"/> installs a silent sink before
     /// this runs, so nothing but these lines ever reaches real stdout).
@@ -53,15 +48,12 @@ internal static class McpProxy
     /// Both pumps run on background threads (reading <see cref="Console.In"/> can't be interrupted),
     /// so returning never waits on a read that may never complete.
     /// </summary>
-    internal static int Run(long stdinHandleValue, long stdoutHandleValue, TextReader? input = null)
+    internal static int Run(ToolConnection tool, TextReader? input = null)
     {
         Console.Out.NewLine = "\n";
 
-        using var stdinHandle = new SafeFileHandle((nint)stdinHandleValue, ownsHandle: true);
-        using var stdoutHandle = new SafeFileHandle((nint)stdoutHandleValue, ownsHandle: true);
-
-        using var toolStdin = new StreamWriter(new FileStream(stdinHandle, FileAccess.Write), WriteEncoding) { NewLine = "\n", AutoFlush = true };
-        using var toolStdout = new StreamReader(new FileStream(stdoutHandle, FileAccess.Read), Encoding.UTF8);
+        var toolStdin = tool.Input;
+        var toolStdout = tool.Output;
 
         using var toolEnded = new ManualResetEventSlim(initialState: false);
         using var clientEnded = new ManualResetEventSlim(initialState: false);
@@ -112,7 +104,7 @@ internal static class McpProxy
         return ExitToolGone;
     }
 
-    private static void PumpOurInput(TextReader source, StreamWriter destination)
+    private static void PumpOurInput(TextReader source, TextWriter destination)
     {
         string? line;
         while ((line = source.ReadLine()) != null)
@@ -121,7 +113,7 @@ internal static class McpProxy
         }
     }
 
-    private static void PumpToolOutput(StreamReader source)
+    private static void PumpToolOutput(TextReader source)
     {
         string? line;
         while ((line = source.ReadLine()) != null)
