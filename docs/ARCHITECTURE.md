@@ -389,6 +389,18 @@ version/error codes) but fully self-contained -- one tool, `say_goodbye`, return
 MCP"`. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
 real Python process) and by `tests/Service/Integration/GoodbyeTests.cs`.
 
+`src/Service/ToolConsole.cs` + `ToolLauncher.CreateStartInfo` ([issue #44](https://github.com/croicu/desk-tools/issues/44)):
+whether a launched tool gets a visible console window. `Host` asks `ToolConsole.IsVisible(name, settings)` per launch --
+the core `settings.console` (default `false`) overridden per tool by the `"tools"` section (see docs/PROTOCOL.md)
+-- and passes it down through `McpToolLauncher.Launch` to `ToolLauncher`, which sets `CreateNoWindow = !visible`.
+Hidden by default for every tool and build (the tools talk over redirected stdio and never need a console). A
+malformed override is a warning and the tool launches with the default (the manifest-is-optional invariant).
+Verified with a real Service: with the default, the Python `goodbye` tool has no console window and still answers over
+stdio; with `"tools": { "hello": { "console": true } }` exactly one console window, the .NET `hello` tool's, appears.
+`CreateNoWindow` hides the window but each tool still has a `conhost.exe` child, so the issue's "ideally no conhost" is
+not met by this mechanism. `ToolLauncher.CreateStartInfo` is split out so a test can inspect the start description
+without starting a process.
+
 `src/Base/DevRedirect.cs`: lets an *installed* `Service.exe`/`Desk.exe` under Program Files hand
 off to a local dev build without the installed copy's own folder ever being touched -- the earlier
 approach `scripts/link-program-files.py` originally took (rename `C:\Program Files\Desk Tools` to

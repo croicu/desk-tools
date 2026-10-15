@@ -219,6 +219,21 @@ A malformed module-tier `settings.json` throws (`SettingsError`); a malformed `s
 logged and ignored, since it's the optional/personal tier. If the module tier has no file, `Load()` falls
 back to restrictive defaults (`debug=false`, `logLevel=error`) and logs a warning.
 
+### settings.json -- `"tools"` section
+
+Per-tool overrides of the core `settings.console`, read with `Settings.Section("tools")` on every launch (so a
+change applies to the next launch without restarting Service) from any tier -- settings.json, the per-user file or
+settings.local.json (showing a console is harmless, so the per-user tier is fine for it):
+
+```json
+"tools": { "hello": { "console": true } }
+```
+
+- `<tool name>.console` (boolean) -- whether that tool, named as in `mcp-registry/<name>.json`, gets a visible console
+  window; the name is matched case-insensitively. Absent means the `console` default. A malformed entry (not an
+  object, or a `console` that is not a boolean) is logged as a warning and ignored: the tool launches with the
+  default, never fails to launch.
+
 ### settings.json -- `"secrets"` section
 
 Read with `Settings.Section("secrets")`; written to the per-user file by the secrets file picker
@@ -244,6 +259,12 @@ Read with `Settings.Section("secrets")`; written to the per-user file by the sec
   [issue #69](https://github.com/croicu/desk-tools/issues/69)). Leave it off in anything shipped: the
   shipped registry is trusted because it sits next to Service, a caller-chosen one is not. Not read
   from the per-user settings file (which any process running as the user can write).
+- `console` (boolean, default `false`) -- whether a tool Service launches gets a visible console window
+  ([issue #44](https://github.com/croicu/desk-tools/issues/44)). Hidden for every tool by default, whatever its flavor
+  (a .NET dll, a Python script) and whichever build: the tools talk over redirected stdio and never need one. This is
+  the default for all tools; the `"tools"` section (below) overrides it per tool. Implemented with
+  `CreateNoWindow`, which hides the window but not the tool's `conhost.exe`. Tool output on stderr is not captured
+  either way: it appears in the console when one is visible and is lost otherwise.
 - `logDir` (string, directory, default unset -- no file logging) -- installs a `FileLog` sink
   writing a timestamped log file into this directory; overridable per-invocation by `--log <dir>`
   (see the CLI section above). See `docs/ARCHITECTURE.md`'s `FileLog` entry.

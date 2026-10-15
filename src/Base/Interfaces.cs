@@ -77,6 +77,13 @@ public interface ISettingsProvider
     /// programs (and request secrets for them) at Service's privilege. Meant for development and tests.
     /// </summary>
     bool AllowCallerRegistry { get; }
+
+    /// <summary>
+    /// Whether a tool Service launches gets a visible console window (issue #44). Default false: the tools talk
+    /// over redirected stdio and never need one. This is the default for every tool; a <c>"tools"</c> section
+    /// (<c>"tools": { "hello": { "console": true } }</c>) overrides it per tool.
+    /// </summary>
+    bool ToolConsole { get; }
 }
 
 /// <summary>

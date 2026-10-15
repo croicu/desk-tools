@@ -40,6 +40,7 @@ public sealed record Settings : ISettingsProvider
     public string? LogDir { get; }
     public int Port { get; }
     public bool AllowCallerRegistry { get; }
+    public bool ToolConsole { get; }
 
     private Settings(
         bool debug,
@@ -49,7 +50,8 @@ public sealed record Settings : ISettingsProvider
         int idleTimeout,
         string? logDir,
         int port,
-        bool allowCallerRegistry)
+        bool allowCallerRegistry,
+        bool toolConsole)
     {
         Debug = debug;
         LogLevel = logging;
@@ -59,6 +61,7 @@ public sealed record Settings : ISettingsProvider
         LogDir = logDir;
         Port = port;
         AllowCallerRegistry = allowCallerRegistry;
+        ToolConsole = toolConsole;
     }
 
     public static Settings Current => CurrentInstance.Value ?? throw new InvalidOperationException("Settings.Load() must be called first.");
@@ -79,6 +82,7 @@ public sealed record Settings : ISettingsProvider
         string? logDir = null;
         var port = DefaultPort;
         var allowCallerRegistry = false;
+        var toolConsole = false;
 
         var payload = LoadPayload(modulePath ?? DefaultModulePath, path, localPath ?? DefaultLocalPath);
 
@@ -189,6 +193,16 @@ public sealed record Settings : ISettingsProvider
 
                 allowCallerRegistry = allowCallerRegistryEl.GetBoolean();
             }
+
+            if (payload.TryGetValue("console", out var toolConsoleEl))
+            {
+                if (toolConsoleEl.ValueKind != JsonValueKind.True && toolConsoleEl.ValueKind != JsonValueKind.False)
+                {
+                    throw new SettingsError("'settings.console' in settings.json must be true or false.");
+                }
+
+                toolConsole = toolConsoleEl.GetBoolean();
+            }
         }
 
         if (logCategories.Count == 0)
@@ -200,7 +214,7 @@ public sealed record Settings : ISettingsProvider
             logCategories = expandCategories ? new List<string>() : new List<string> { DiagnosticsCategories.General };
         }
 
-        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir, port, allowCallerRegistry);
+        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir, port, allowCallerRegistry, toolConsole);
         CurrentInstance.Value = settings;
 
         return settings;

@@ -26,4 +26,6 @@ public sealed class TestSettings : ISettingsProvider
     public int Port { get; init; } = 51823;
 
     public bool AllowCallerRegistry { get; init; }
+
+    public bool ToolConsole { get; init; }
 }
