@@ -456,8 +456,9 @@ dotnet build installer/Setup.wixproj
 
 - **Secrets** -- [issue #50](https://github.com/croicu/desk-tools/issues/50): give elevated MCP tools
   credentials from the user's KeePassXC database without any secret value reaching a
-  medium-integrity process. In Implementation (slices 1-4a merged; 4b, Service delivering declared secrets as environment
-  variables, is [issue #73](https://github.com/croicu/desk-tools/issues/73)); the issue holds the design.
+  medium-integrity process. Slices 1-4b are merged (Service delivers declared secrets as environment variables). In
+  Implementation: the ntfy pager, the first tool to use them ([issue #76](https://github.com/croicu/desk-tools/issues/76));
+  the issue holds the design. Backlog: #74 (Launcher assembly), #67 (async delivery), #51 (Linux).
 
 ## Pending Tasks
 

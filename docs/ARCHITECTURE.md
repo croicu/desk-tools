@@ -34,7 +34,8 @@ capabilities are expected to keep to them.
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Context/Errors/
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
      Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
-     minimal stdio MCP server, references Base.csproj), src/Desk/ (a console client for
+     minimal stdio MCP server, references Base.csproj), src/Pager/ (the ntfy pager MCP tool,
+     references Base.csproj only), src/Desk/ (a console client for
      src/Service's Host, references Base.csproj), src/Secrets/ (KeePass-backed secret retrieval,
      references Base.csproj), and scripts/ (standalone Python utilities outside
      the .NET build entirely): what it owns, what it depends on. -->
@@ -185,6 +186,20 @@ other, so publishing only one would never pull the others in, and `Hello`'s own 
 never actually shipped in the MSI at all. Confirmed by reading the built `.msi`'s own `File` table
 directly, not just the intermediate publish folder -- `Hello.exe`/`Desk.exe`/`Service.exe` and
 `mcp-registry/hello.json` are all genuinely embedded.
+
+`src/Pager/` ([issue #76](https://github.com/croicu/desk-tools/issues/76)): the ntfy pager, the first tool that
+keeps to the invariants above end to end. A hand-rolled stdio MCP server in `Program.cs` (the same shape as
+`src/Hello`'s -- a shared MCP stdio helper in `Base` is the obvious next step once a third tool needs it, not
+before), one tool, `page`, with `PagerConfig` (reads `NTFY_TOPIC`/`NTFY_SERVER` from the environment, never
+throws, leaves a `Problem` that only a `page` call reports) and `Notifier` (one JSON `POST` through an injectable
+`HttpMessageHandler`, so tests stay offline; never throws for a failed send; the topic is never in the URL, the
+answer or a log line). **It references `Base` only** -- not Service, Desk or Secrets (invariant 1) -- and
+`Pager.exe` starts with `DevRedirect.TryHandoff("Pager.exe", ...)` like Service and Desk, so the installed copy
+hands off to a `.dev` build when `link-program-files` has set one up. It is published into the MSI with the others
+(`installer/Setup.wixproj`), so `C:\Program Files\Desk Tools\Pager.exe` exists after installing; a bare
+`"command": "pager"` in `.mcp.json` needs that folder on `PATH`, which the MSI does not change. Its registry
+fragment declares `NTFY_TOPIC` (`<McpSecret Include="NTFY_TOPIC" Entry="ntfy" Key="desk-pager" />`), so through
+Service the topic arrives from KeePass; run any other way it is simply an environment variable.
 
 `src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
 `docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
@@ -528,7 +543,11 @@ finding the database so two launches never open two file pickers. Its parameterl
   returns a task at once and runs the dialog on its own STA thread. **The dialog never times out** (a timer
   could close it while the person is typing): it stays up until the user answers or cancels it, or the
   cancellation token fires (`PromptedPassword.Dispose`, so Service exit leaves no orphaned dialog and no
-  launch blocked forever). It shows the database path and "attempt N of 3", masks the edit box
+  launch blocked forever). **It takes the foreground itself**: Service is started by Task Scheduler, so Windows'
+  foreground lock refuses a plain `SetForegroundWindow` (the taskbar button just flashes, and the user types the
+  password into whatever is in front). Once the dialog is on screen it attaches its thread's input to the
+  foreground window's thread for the duration of `SetForegroundWindow`/`SetFocus` (best effort: if it still fails it
+  is topmost and logs a warning, and clicking it works). It shows the database path and "attempt N of 3", masks the edit box
   (`ES_PASSWORD`), and the password goes into pinned `char[]`/`byte[]` buffers (never a `string`), the char
   buffer zeroed and the edit box cleared before it closes. Because Service is elevated, so is the window: a
   medium-integrity process can't script it or read the box (UIPI). Not DPI-aware, English only.
@@ -556,6 +575,13 @@ finding the database so two launches never open two file pickers. Its parameterl
   into pinned buffers zeroed as they are outgrown, never through a `StreamReader`, so a caller can
   zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
   `string` where it must, in the launched tool's environment block.
+- `tests/Apps/Pager` (`Pager.App`, not shipped; [issue #76](https://github.com/croicu/desk-tools/issues/76)): runs
+  `desk mcp pager` and speaks MCP to it -- `initialize`, `tools/list`, and with `--send` one `page` call. Without
+  `--send` nothing is sent. **`--send` sends a real notification** to the topic in KeePass `ntfy`/`desk-pager`; with
+  the dummy database that is the all-zero GUID on ntfy.sh, public and guessable. To test without the internet, set
+  `NTFY_SERVER` to a local listener in Service's environment before starting it (a tool inherits Service's
+  environment). The dialog is Service's own (elevated when started by the scheduled task): type the password
+  yourself.
 - `tests/Apps/McpSecrets` (`McpSecrets.App`, not shipped; [issue #73](https://github.com/croicu/desk-tools/issues/73)):
   checks secret delivery end to end through the real chain. It writes a throwaway registry holding an
   `echo-secret` tool that declares one secret (`scripts/echo-secret.py`: a plain stdio script that answers each

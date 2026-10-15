@@ -6,7 +6,7 @@ CLI signature and file format schemas for `desk-tools`.
 
 <!-- Command name, arguments, flags, exit codes. -->
 
-`src/Service` (`desk-tools`), `src/Hello` (`hello`), and `src/Desk` (`desk`) all accept:
+`src/Service` (`desk-tools`), `src/Hello` (`hello`), `src/Pager` (`pager`), and `src/Desk` (`desk`) all accept:
 
 - `--log <dir>` -- write a timestamped log file into `<dir>` (creating it if missing), in addition
   to whatever console/debug sinks are already active; overrides `settings.json`'s `logDir` if both
@@ -54,6 +54,39 @@ Unknown methods get `-32601` (Method not found); malformed JSON gets `-32700` (P
 `id: null`. Not yet implemented: `resources`, `prompts`, `listChanged` notifications, pagination --
 this is intentionally minimal, a stepping stone toward the real dispatch work referenced in
 `docs/ARCHITECTURE.md`'s `Host` entry.
+
+## MCP (`src/Pager`)
+
+A standalone MCP server that sends push notifications through [ntfy](https://ntfy.sh)
+([issue #76](https://github.com/croicu/desk-tools/issues/76)). Same hand-rolled stdio transport and protocol
+version (`2025-06-18`) as `src/Hello` above: `initialize`, `tools/list`, `tools/call`, the same `-32601` /
+`-32700` / unknown-tool `-32602` errors; server name `pager`. Run it straight from `.mcp.json`
+(`"command": "pager"`, with `NTFY_TOPIC` in its `env`) or through Service (`desk mcp pager`), which delivers the
+topic from KeePass.
+
+**Environment** (read once at start; a missing or unusable value never stops the server, only `page`):
+
+- `NTFY_TOPIC` -- required: the topic to publish to (letters, digits, `_` and `-`, 1 to 64 characters). The one
+  secret: anyone who knows it can read and post. Declared in the registry as `NTFY_TOPIC` <- KeePass entry
+  `ntfy`, key `desk-pager`.
+- `NTFY_SERVER` -- optional: an absolute `http`/`https` URL, default `https://ntfy.sh/`.
+
+**`tools/list`** returns one tool, `page`, with `inputSchema`: `message` (string, required, at most 4096
+characters), `title` (string, at most 250), `priority` (integer 1 to 5; 3 is the default), `tags` (array of at most
+10 strings of at most 50 characters); no other properties.
+
+**`tools/call` `page`** publishes one notification and returns a normal tool result:
+`{"content":[{"type":"text","text":"..."}],"isError":false}` -- `"Notification sent."` on success.
+Everything that goes wrong is `isError: true` with a sentence the model can read, never a JSON-RPC error:
+`Not sent: ...` for arguments that fail validation; `The pager is not configured: ...` when `NTFY_TOPIC` or
+`NTFY_SERVER` is missing or unusable (docs/ARCHITECTURE.md, invariant 3); `The ntfy server '<host>' refused the
+notification: <status>.`; `Could not reach the ntfy server '<host>': ...`; `Timed out after 15 seconds ...`. No
+message ever contains the topic.
+
+**Wire format**: one `POST` to the server root (`https://ntfy.sh/`) with `Content-Type: application/json` and the
+body `{"topic": ..., "message": ..., "title"?: ..., "priority"?: ..., "tags"?: [...]}` -- ntfy's JSON publishing
+API -- rather than `POST /<topic>`, so the topic is never in a URL, a header or a log line, and non-ASCII text needs
+no header encoding. Timeout 15 seconds.
 
 ## Echo protocol (`src/Service`'s `Host` / `src/Desk`)
 
