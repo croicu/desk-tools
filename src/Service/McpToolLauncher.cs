@@ -31,10 +31,32 @@ internal static class McpToolLauncher
     /// directory, since that's where the real <c>hello</c> registry entry (and Hello.dll itself)
     /// actually land.
     /// </summary>
-    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null)
+    /// <summary>
+    /// <paramref name="callerRegistryDirectory"/> (issue #69), when given, is searched first: if
+    /// <c>&lt;it&gt;/mcp-registry/&lt;name&gt;.json</c> exists the tool is launched from there (its args and
+    /// working directory resolve against that directory), otherwise the shipped registry is used. The
+    /// caller (<c>Host</c>) is responsible for having checked that the caller may supply one at all.
+    /// </summary>
+    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null, string? callerRegistryDirectory = null)
     {
         var baseDirectory = registryBaseDirectory ?? AppContext.BaseDirectory;
         var registryPath = Path.Combine(baseDirectory, RegistryDirName, $"{name}.json");
+
+        if (callerRegistryDirectory is not null)
+        {
+            var callerPath = Path.Combine(callerRegistryDirectory, RegistryDirName, $"{name}.json");
+            if (File.Exists(callerPath))
+            {
+                Logger.Info($"mcp registry: launching '{name}' from the caller's registry '{callerPath}'.", RegistryCategory);
+                baseDirectory = callerRegistryDirectory;
+                registryPath = callerPath;
+            }
+            else
+            {
+                Logger.Info($"mcp registry: '{name}' is not in the caller's registry '{callerRegistryDirectory}'; using the shipped one.", RegistryCategory);
+            }
+        }
+
         if (!File.Exists(registryPath))
         {
             throw new AppError($"no registered MCP tool named '{name}' (expected '{registryPath}').");

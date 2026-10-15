@@ -94,6 +94,13 @@ Three methods today:
   Trusts the caller-supplied `processId` as-is -- no verification against the real TCP connection's
   owning process (a known, deliberate simplification; the loopback listener is local-machine-only
   exposure either way).
+  Optional param `"registryDir"` (string, fully qualified local path, no UNC;
+  [issue #69](https://github.com/croicu/desk-tools/issues/69)): a caller-chosen registry searched
+  *before* the shipped one -- `<registryDir>/mcp-registry/<name>.json` is used if it exists (its `args`
+  and working directory resolve against `registryDir`), otherwise the shipped registry. **Refused with
+  `-32602` unless `settings.allowCallerRegistry` is `true`** (default `false`): Service is elevated and
+  any local process can reach it, so honoring a caller's registry by default would let that process run
+  arbitrary programs, and request secrets for them, at Service's privilege. For development and tests.
 
 `src/Desk` is this protocol's main client, with three subcommands (see the CLI section above):
 
@@ -115,7 +122,9 @@ Three methods today:
   EOF -- at which point it closes its copy of the tool's stdin (so the tool sees EOF too and exits
   its own read loop gracefully) and exits itself. Makes `desk mcp <name>` usable as a real
   `.mcp.json` `command` entry pointing at Desk instead of the tool's own executable directly --
-  Desk never parses the relayed traffic, purely a line relay.
+  Desk never parses the relayed traffic, purely a line relay. `--registry <dir>` (mcp only) sends it
+  as the request's `registryDir` (made absolute first) -- see the `mcp` method above for the setting
+  that must allow it.
 
 ## File formats
 
@@ -187,6 +196,11 @@ Read with `Settings.Section("secrets")`; written to the per-user file by the sec
   launched via `mcp` is still alive; it restarts when the last one exits
   ([issue #45](https://github.com/croicu/desk-tools/issues/45)). An explicit `shutdown` request
   ignores this and exits immediately.
+- `allowCallerRegistry` (boolean, default `false`) -- whether Service honors an `mcp` request's
+  `registryDir` (a caller-chosen tool registry, `desk mcp <name> --registry <dir>`;
+  [issue #69](https://github.com/croicu/desk-tools/issues/69)). Leave it off in anything shipped: the
+  shipped registry is trusted because it sits next to Service, a caller-chosen one is not. Not read
+  from the per-user settings file (which any process running as the user can write).
 - `logDir` (string, directory, default unset -- no file logging) -- installs a `FileLog` sink
   writing a timestamped log file into this directory; overridable per-invocation by `--log <dir>`
   (see the CLI section above). See `docs/ARCHITECTURE.md`'s `FileLog` entry.

@@ -80,6 +80,52 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
+    public void Load_NoAllowCallerRegistry_DefaultsToFalse()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "info" } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.IsFalse(settings.AllowCallerRegistry);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_AllowCallerRegistryTrue_IsHonored()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "allowCallerRegistry": true } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.IsTrue(settings.AllowCallerRegistry);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_AllowCallerRegistryNotBoolean_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "allowCallerRegistry": "yes" } }""");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
     public void Load_IdleTimeoutNotNumber_ThrowsSettingsError()
     {
         var path = WriteTempSettingsFile("""{ "settings": { "idleTimeout": "not-a-number" } }""");

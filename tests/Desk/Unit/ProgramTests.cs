@@ -53,6 +53,22 @@ public sealed class ProgramTests
     }
 
     [TestMethod]
+    public void ParseArgs_McpWithRegistry_SetsRegistryDir()
+    {
+        var arguments = Program.ParseArgs(["mcp", "echo-secret", "--registry", "/tmp/reg"]);
+
+        Assert.AreEqual(DeskCommand.Mcp, arguments.Command);
+        Assert.AreEqual("echo-secret", arguments.McpToolName);
+        Assert.AreEqual("/tmp/reg", arguments.RegistryDir);
+    }
+
+    [TestMethod]
+    public void ParseArgs_McpWithoutRegistry_LeavesRegistryDirNull()
+    {
+        Assert.IsNull(Program.ParseArgs(["mcp", "hello"]).RegistryDir);
+    }
+
+    [TestMethod]
     public void ParseArgs_McpWithLog_SetsAllThree()
     {
         var arguments = Program.ParseArgs(["mcp", "hello", "--log", "/var/log/desk"]);

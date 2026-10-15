@@ -403,7 +403,12 @@ directory; overridable via an optional `registryBaseDirectory` testing seam, def
 production behavior, the same pattern as `Host`'s own `port` constructor parameter), parses the full
 `.mcp.json`-shaped fragment (`command`/`args`/`env`), and calls `ToolLauncher.Launch` with the
 registry's own directory as the working directory (matching `args`' paths, which are relative to
-it, not to whichever process happens to be calling this). `AppError` on a missing registry file,
+it, not to whichever process happens to be calling this). An optional `callerRegistryDirectory`
+(issue #69, `desk mcp <name> --registry <dir>`) is searched first: if `<dir>/mcp-registry/<name>.json`
+exists the tool launches from there (and `<dir>` is the working directory), else the shipped registry
+is used. `Host` only passes it after checking `settings.allowCallerRegistry` (default off) and that it
+is a fully qualified, non-UNC path -- the shipped registry is trusted because it sits next to Service,
+so a caller-chosen one must be an explicit, dev-only opt-in. `AppError` on a missing registry file,
 malformed JSON, or a fragment missing/misshaping any of `command`/`args`/`env`.
 
 `src/Service/Platform/{Windows,Linux,Neutral}/HandleDuplicator.cs` (issue #32): hands a launched

@@ -24,4 +24,6 @@ public sealed class TestSettings : ISettingsProvider
     public string? LogDir { get; init; }
 
     public int Port { get; init; } = 51823;
+
+    public bool AllowCallerRegistry { get; init; }
 }
