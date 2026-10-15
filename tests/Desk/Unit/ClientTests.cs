@@ -109,7 +109,9 @@ public sealed class ClientTests
 
         var client = new Client(new TestSettings(), port: port);
 
-        Assert.ThrowsExactly<AppError>(() => client.Send("ping"));
+        // Refused (nothing listening) is its own type -- Service is simply not running -- but still an AppError.
+        var error = Assert.ThrowsExactly<ServiceNotRunningError>(() => client.Send("ping"));
+        Assert.IsInstanceOfType<AppError>(error);
     }
 
     [TestMethod]

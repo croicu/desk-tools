@@ -1,3 +1,10 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Base.Sinks;
+using Croicu.Desk.Tools.Mocks;
+
 namespace Croicu.Desk.Tools.Desk.Tests.Unit;
 
 /// <summary>
@@ -76,5 +83,101 @@ public sealed class ProgramTests
         Assert.AreEqual(DeskCommand.Mcp, arguments.Command);
         Assert.AreEqual("hello", arguments.McpToolName);
         Assert.AreEqual("/var/log/desk", arguments.LogDir);
+    }
+
+    // --- desk shutdown ---
+
+    private static int ClosedPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    /// <summary>Runs <see cref="Program.Shutdown"/> with the given client and returns its exit code and printed output.</summary>
+    private static (int ExitCode, string Output) RunShutdown(Client client)
+    {
+        var output = new StringWriter();
+        Logger.SetLogger(new DiagnosticsLog(printWriter: output));
+        try
+        {
+            return (Program.Shutdown(client), output.ToString());
+        }
+        finally
+        {
+            Logger.SetLogger(null);
+        }
+    }
+
+    [TestMethod]
+    public void Shutdown_ServiceNotRunning_SaysSoAndExitsZeroInsteadOfFailing()
+    {
+        var (exitCode, output) = RunShutdown(new Client(new TestSettings(), port: ClosedPort()));
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(output, "not running");
+        StringAssert.Contains(output, "nothing to shut down");
+    }
+
+    [TestMethod]
+    public void Shutdown_ServiceAnswers_ConfirmsAndExitsZero()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        void Answer()
+        {
+            using var peer = listener.AcceptTcpClient();
+            using var reader = new StreamReader(peer.GetStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            using var writer = new StreamWriter(peer.GetStream(), new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true) { AutoFlush = true };
+            reader.ReadLine();
+            writer.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"ok\"}");
+        }
+
+        var server = Task.Run(Answer);
+        try
+        {
+            var (exitCode, output) = RunShutdown(new Client(new TestSettings(), port: port));
+
+            Assert.AreEqual(0, exitCode);
+            StringAssert.Contains(output, "Shutdown requested.");
+            Assert.IsTrue(server.Wait(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public void Shutdown_ConnectionBreaksMidRequest_IsStillAnError()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        void ResetAfterReadingTheRequest()
+        {
+            using var peer = listener.AcceptTcpClient();
+            using var reader = new StreamReader(peer.GetStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            reader.ReadLine();
+            peer.Client.LingerState = new LingerOption(enable: true, seconds: 0);
+            peer.Client.Close();
+        }
+
+        var server = Task.Run(ResetAfterReadingTheRequest);
+        try
+        {
+            // Not "Service is not running": something did answer, then the connection broke -- a real failure.
+            Assert.ThrowsExactly<AppError>(() => RunShutdown(new Client(new TestSettings(), port: port)));
+            Assert.IsTrue(server.Wait(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 }
