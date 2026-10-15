@@ -130,6 +130,11 @@ public sealed class McpProxyTests
 
         Assert.AreEqual("line-from-client", tool.ToolStdin.ReadLine());
         tool.ToolStdout.WriteLine("line-from-tool");
+
+        // The client's input is already exhausted, so the proxy closes the tool's stdin. Wait for the
+        // tool to see that EOF before it dies: otherwise, on a slow machine, the tool's output can end
+        // first and the proxy reports "tool gone" instead of "client disconnected".
+        Assert.IsNull(tool.ToolStdin.ReadLine());
         tool.Die();
 
         Assert.IsTrue(proxy.Wait(BoundedWait));
