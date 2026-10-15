@@ -135,7 +135,15 @@ replied to first, then the exact same `_shutdownSignal` the idle-timeout check a
 set from the connection handler instead, so `WaitForIdleShutdown`'s teardown (stop listening, join
 the accept thread) runs identically regardless of which of the two triggered it (see
 [issue #22](https://github.com/croicu/desk-tools/issues/22) -- deliberately one shutdown path, not
-two). `Program.cs`'s `Run()` first acquires `SingletonGuard` (`src/Service/Platform/`) -- a
+two). **A failure on one connection never escapes it** ([issue #78](https://github.com/croicu/desk-tools/issues/78)):
+`ServeConnection` (the part of the handler a test can feed any `Stream`) catches an `IOException` -- the client went
+away before its request was served or its reply written, a routine event now that a launch can wait on the
+password dialog for as long as the user takes -- as a Warning, and anything else unexpected as an Error, then just
+drops the connection. Handlers run on thread-pool threads, where an unhandled exception ends the whole process and,
+through their watchdogs, every tool it launched; this is what had killed Service (and with it every tool) when an
+MCP client was restarted mid-launch. A `shutdown` whose acknowledgment cannot be delivered is still honored. The
+client side mirrors it: `Desk.Client` turns an `IOException` on the connection into an `AppError` (a message and
+exit code 1, not a crash report). `Program.cs`'s `Run()` first acquires `SingletonGuard` (`src/Service/Platform/`) -- a
 named `Mutex` (`Local\Desk Tools Service`) guarding against a second `Host` racing for the same
 port (see [issue #27](https://github.com/croicu/desk-tools/issues/27)); if another instance already
 holds it, `Run()` logs and returns immediately, no `Host` constructed, no port bind attempted. Only

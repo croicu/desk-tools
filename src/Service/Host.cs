@@ -207,22 +207,60 @@ internal sealed class Host
     /// </summary>
     private void HandleConnection(TcpClient client)
     {
+        // Nothing may escape this callback: it runs on a thread-pool thread, where an unhandled exception ends
+        // the whole process (and every tool Service launched with it) -- see ServeConnection.
+        try
+        {
+            using (client)
+            using (var stream = client.GetStream())
+            {
+                ServeConnection(stream);
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // GetStream() or the dispose of an already-broken connection.
+            Logger.Warning($"host: a connection could not be closed cleanly: {error.Message}", Category);
+        }
+    }
+
+    /// <summary>
+    /// Serves one request on an already-open connection. <b>Never lets a failure on the connection escape</b>
+    /// (issue #78): a client that has gone away before its reply is written is routine -- an MCP client
+    /// kills its Desk proxy while the launch is still waiting for the master-password dialog, say -- and
+    /// the failed write would otherwise be an unhandled exception on a thread-pool thread, which kills the
+    /// whole Service and every tool it launched. A client that vanished is a Warning; anything else
+    /// unexpected is an Error; either way the connection is simply dropped. A <c>shutdown</c> whose
+    /// acknowledgment could not be delivered is still honored. Internal so a test can hand it a stream that
+    /// fails the way a dead connection does.
+    /// </summary>
+    internal void ServeConnection(Stream stream)
+    {
         Interlocked.Increment(ref _inFlightCount);
         try
         {
             RecordActivity();
 
             var shutdownRequested = false;
-            using (client)
-            using (var stream = client.GetStream())
-            using (var reader = new StreamReader(stream, Encoding.UTF8))
-            using (var writer = new StreamWriter(stream, WriteEncoding) { NewLine = "\n", AutoFlush = true })
+            try
             {
-                var line = reader.ReadLine();
-                if (line is not null)
+                using (var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true))
+                using (var writer = new StreamWriter(stream, WriteEncoding, bufferSize: 1024, leaveOpen: true) { NewLine = "\n", AutoFlush = true })
                 {
-                    shutdownRequested = HandleLine(line, writer);
+                    var line = reader.ReadLine();
+                    if (line is not null)
+                    {
+                        shutdownRequested = HandleLine(line, writer);
+                    }
                 }
+            }
+            catch (IOException error)
+            {
+                Logger.Warning($"host: the client went away before its request was served: {error.Message}", Category);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                Logger.Error($"host: unexpected failure serving a connection: {error}", Category);
             }
 
             if (shutdownRequested)
@@ -291,7 +329,16 @@ internal sealed class Host
                         WriteResult(writer, idElement, "pong");
                         return false;
                     case ShutdownMethod:
-                        WriteResult(writer, idElement, "ok");
+                        try
+                        {
+                            WriteResult(writer, idElement, "ok");
+                        }
+                        catch (IOException error)
+                        {
+                            // The requester went away before its acknowledgment: it still asked for the shutdown.
+                            Logger.Warning($"host: could not deliver the shutdown acknowledgment ({error.Message}); shutting down anyway.", Category);
+                        }
+
                         return true;
                     case McpMethod:
                         HandleMcp(idElement, paramsElement, writer);
