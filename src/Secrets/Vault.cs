@@ -67,7 +67,7 @@ internal sealed class Vault
             if (password is null)
             {
                 throw new AppError(
-                    $"no master password available for '{_databasePath}' (attempt {attempt + 1} of {MaxPasswordAttempts}): the prompt was cancelled or timed out.",
+                    $"no master password available for '{_databasePath}' (attempt {attempt + 1} of {MaxPasswordAttempts}): the prompt was cancelled or closed.",
                     LogCategory.Secrets);
             }
 

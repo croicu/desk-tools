@@ -12,8 +12,8 @@ namespace Croicu.Desk.Tools.Secrets.Tests.Unit;
 public sealed class PasswordPromptTests
 {
     [TestMethod]
-    public void Ask_ThrowsAppError()
+    public void AskAsync_ThrowsAppError()
     {
-        Assert.ThrowsExactly<AppError>(() => new PasswordPrompt().Ask(@"C:\data\my.kdbx", 0, 3));
+        Assert.ThrowsExactly<AppError>(() => new PasswordPrompt().AskAsync(@"C:\data\my.kdbx", 0, 3, CancellationToken.None));
     }
 }

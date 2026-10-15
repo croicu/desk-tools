@@ -8,7 +8,7 @@ internal interface IPasswordSource
 {
     /// <summary>
     /// The password to try for <paramref name="databasePath"/> on 0-based <paramref name="attempt"/>,
-    /// or null if none is available (cancelled, timed out). The caller zeroes the returned array.
+    /// or null if none is available (cancelled or closed). The caller zeroes the returned array.
     /// </summary>
     byte[]? Get(string databasePath, int attempt);
 
@@ -18,18 +18,21 @@ internal interface IPasswordSource
 
 /// <summary>
 /// Asks the user for the KeePass master password -- the platform-specific part (a Windows dialog
-/// today, see <c>Platform/</c>) behind <see cref="PromptedPassword"/>, which adds the holding and
-/// re-prompt policy. Kept as an interface so that policy is unit-testable without a window.
+/// today, see <c>Platform/</c>) behind <see cref="PromptedPassword"/>, which adds the holding
+/// policy. Kept as an interface so that policy is unit-testable without a window.
 /// </summary>
 internal interface IPasswordPrompt
 {
     /// <summary>
-    /// Shows the prompt for <paramref name="databasePath"/>, labelled "attempt
+    /// Starts asking for the password for <paramref name="databasePath"/>, labelled "attempt
     /// <paramref name="attempt"/> + 1 of <paramref name="maxAttempts"/>" when the attempt is not the
-    /// first. Returns the password as bytes the caller zeroes, or null if the user cancelled or the
-    /// prompt timed out.
+    /// first, and returns at once. The task completes with the password as bytes the receiver zeroes,
+    /// or null if the user cancelled -- <b>and never on a timer</b>: the prompt stays up until the user
+    /// answers or <paramref name="cancellation"/> fires, which closes it (completing with null). Whoever
+    /// is waiting for the answer decides how long it is willing to (issue #66; today a launch waits for as long as it takes). A failure to show the
+    /// prompt faults the task rather than throwing here.
     /// </summary>
-    byte[]? Ask(string databasePath, int attempt, int maxAttempts);
+    Task<byte[]?> AskAsync(string databasePath, int attempt, int maxAttempts, CancellationToken cancellation);
 }
 
 /// <summary>

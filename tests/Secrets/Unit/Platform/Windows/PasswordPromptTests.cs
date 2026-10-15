@@ -5,7 +5,7 @@ using System.Text;
 namespace Croicu.Desk.Tools.Secrets.Tests.Unit;
 
 /// <summary>
-/// Drives the <b>real</b> dialog: starts <see cref="PasswordPrompt.Ask"/> on a task, finds the window
+/// Drives the <b>real</b> dialog: starts <see cref="PasswordPrompt.AskAsync"/>, finds the window
 /// by its title, then sends it the same messages a click would (WM_SETTEXT into the edit box,
 /// WM_COMMAND IDOK/IDCANCEL). Real windows appear briefly, and two dialogs at once would be found by
 /// title ambiguously, so: tagged Integration (excluded from the default run/CI), and not parallelized.
@@ -58,10 +58,9 @@ public sealed class PasswordPromptTests
         NativeMethods.SendMessageText(edit, WmSetText, IntPtr.Zero, password);
     }
 
-    private static Task<byte[]?> StartAsking(PasswordPrompt prompt, int attempt = 0)
+    private static Task<byte[]?> StartAsking(PasswordPrompt prompt, int attempt = 0, CancellationToken cancellation = default)
     {
-        byte[]? Ask() => prompt.Ask(Db, attempt, 3);
-        return Task.Run(Ask);
+        return prompt.AskAsync(Db, attempt, 3, cancellation);
     }
 
     [TestMethod]
@@ -91,12 +90,47 @@ public sealed class PasswordPromptTests
     }
 
     [TestMethod]
-    public void Ask_NobodyAnswers_TimesOutAndReturnsNull()
+    public void Ask_NobodyAnswers_StaysOpenAndNeverTimesOut()
     {
-        var asking = StartAsking(new PasswordPrompt(TimeSpan.FromSeconds(1)));
+        var asking = StartAsking(new PasswordPrompt());
+        var window = WaitForDialog();
 
-        Assert.IsTrue(asking.Wait(BoundedWait), "the dialog did not close itself after its timeout.");
+        // A timer would have closed it by now (the old default was 2 minutes, but any fixed timer can
+        // close it mid-typing); give it a good while and check it is still there and still waiting.
+        Thread.Sleep(2500);
+        Assert.IsFalse(asking.IsCompleted, "the dialog must wait for the user, not time out.");
+        Assert.IsTrue(NativeMethods.IsWindow(window));
+
+        Click(window, DialogTemplate.IdCancel);
+        Assert.IsTrue(asking.Wait(BoundedWait));
         Assert.IsNull(asking.Result);
+    }
+
+    [TestMethod]
+    public void Ask_TokenCancelled_ClosesTheDialogAndCompletesWithNull()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var asking = StartAsking(new PasswordPrompt(), cancellation: cancellation.Token);
+        var window = WaitForDialog();
+
+        cancellation.Cancel();
+
+        Assert.IsTrue(asking.Wait(BoundedWait), "cancelling the token must close the dialog.");
+        Assert.IsNull(asking.Result);
+        Assert.IsFalse(NativeMethods.IsWindow(window));
+    }
+
+    [TestMethod]
+    public void Ask_TokenAlreadyCancelled_CompletesWithNullAndLeavesNoDialogBehind()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var asking = StartAsking(new PasswordPrompt(), cancellation: cancellation.Token);
+
+        Assert.IsTrue(asking.Wait(BoundedWait));
+        Assert.IsNull(asking.Result);
+        Assert.AreEqual(IntPtr.Zero, NativeMethods.FindWindow("#32770", DialogTemplate.Title));
     }
 
     [TestMethod]

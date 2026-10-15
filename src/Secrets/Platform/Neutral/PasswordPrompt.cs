@@ -7,11 +7,7 @@ namespace Croicu.Desk.Tools.Secrets;
 // "no RID specified" rather than "Linux specifically".
 internal sealed class PasswordPrompt : IPasswordPrompt
 {
-    internal PasswordPrompt(TimeSpan? timeout = null)
-    {
-    }
-
-    public byte[]? Ask(string databasePath, int attempt, int maxAttempts)
+    public Task<byte[]?> AskAsync(string databasePath, int attempt, int maxAttempts, CancellationToken cancellation)
     {
         throw new AppError("asking for the master password is not supported on this platform yet -- see issue #53.", LogCategory.Secrets);
     }

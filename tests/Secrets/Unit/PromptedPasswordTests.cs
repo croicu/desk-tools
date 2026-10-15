@@ -10,6 +10,8 @@ public sealed class PromptedPasswordTests
 
     private static string Text(byte[]? bytes) => Encoding.UTF8.GetString(bytes!);
 
+    // --- answers that arrive at once (queued in the fake) ---
+
     [TestMethod]
     public void Get_FirstCall_PromptsAndReturnsWhatWasEntered()
     {
@@ -150,28 +152,145 @@ public sealed class PromptedPasswordTests
         Assert.ThrowsExactly<ObjectDisposedException>(() => source.Get(Db, 0));
     }
 
-    [TestMethod]
-    public void Get_TwoCallersAtOnce_ShowOneDialogAndShareTheAnswer()
+    // --- the person takes their time (the dialog is left open and answered by hand) ---
+
+    private static (Task<byte[]?> Waiting, FakePasswordPrompt Prompt, PromptedPassword Source) StartWaiting()
     {
-        var prompt = new FakePasswordPrompt { Gate = new ManualResetEventSlim(initialState: false) };
-        prompt.Enqueue("hunter2");
-        using var source = new PromptedPassword(prompt);
+        var prompt = new FakePasswordPrompt();
+        var source = new PromptedPassword(prompt);
 
         byte[]? GetPassword() => source.Get(Db, 0);
 
-        var first = Task.Run(GetPassword);
-        Assert.IsTrue(prompt.Asked.Wait(BoundedWait), "the first caller never reached the prompt.");
-        var second = Task.Run(GetPassword);
-
-        // The second caller must be waiting on the lock, not opening a second dialog.
-        Thread.Sleep(300);
-        prompt.Gate.Set();
-
-        Assert.IsTrue(Task.WaitAll([first, second], BoundedWait), "the callers did not finish.");
-        Assert.AreEqual("hunter2", Text(first.Result));
-        Assert.AreEqual("hunter2", Text(second.Result));
-        Assert.HasCount(1, prompt.Asks);
+        var waiting = Task.Run(GetPassword);
+        Assert.IsTrue(prompt.Asked.Wait(BoundedWait), "the dialog never opened.");
+        return (waiting, prompt, source);
     }
+
+    [TestMethod]
+    public void Get_DialogNotAnsweredYet_WaitsForTheUserAsLongAsItTakes()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+        using (source)
+        {
+            // Long past any timer a previous design had: it must still be waiting, not have given up.
+            Thread.Sleep(700);
+            Assert.IsFalse(waiting.IsCompleted, "the launch must wait for the answer, not time out.");
+            Assert.IsFalse(prompt.WasCancelled);
+
+            prompt.Answer("hunter2");
+
+            Assert.IsTrue(waiting.Wait(BoundedWait));
+            Assert.AreEqual("hunter2", Text(waiting.Result));
+            Assert.HasCount(1, prompt.Asks);
+        }
+    }
+
+    [TestMethod]
+    public void Get_TwoLaunchesAtOnce_ShowOneDialogAndShareTheAnswer()
+    {
+        var (first, prompt, source) = StartWaiting();
+        using (source)
+        {
+            byte[]? GetPassword() => source.Get(Db, 0);
+            var second = Task.Run(GetPassword);
+
+            // The second launch joins the open dialog; it must not open another one.
+            Thread.Sleep(300);
+            Assert.HasCount(1, prompt.Asks);
+
+            prompt.Answer("hunter2");
+
+            Assert.IsTrue(Task.WaitAll([first, second], BoundedWait), "the launches did not finish.");
+            Assert.AreEqual("hunter2", Text(first.Result));
+            Assert.AreEqual("hunter2", Text(second.Result));
+            Assert.HasCount(1, prompt.Asks);
+        }
+    }
+
+    [TestMethod]
+    public void Get_DialogCancelledByTheUser_ReleasesTheWaiterWithNull()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+        using (source)
+        {
+            prompt.Answer(null);
+
+            Assert.IsTrue(waiting.Wait(BoundedWait));
+            Assert.IsNull(waiting.Result);
+        }
+    }
+
+    [TestMethod]
+    public void Dispose_WhileAWaiterIsWaiting_ClosesTheDialogAndReleasesIt()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+
+        source.Dispose();
+
+        Assert.IsTrue(waiting.Wait(BoundedWait), "Service shutting down must not leave a launch blocked forever.");
+        Assert.IsNull(waiting.Result);
+        Assert.IsTrue(prompt.WasCancelled, "the open dialog must be told to close.");
+    }
+
+    [TestMethod]
+    public void Get_RequestForAnotherDatabaseWhileADialogIsOpen_ReturnsNullWithoutASecondDialog()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+        using (source)
+        {
+            var other = source.Get(@"C:\data\other.kdbx", 0);
+
+            Assert.IsNull(other);
+            Assert.HasCount(1, prompt.Asks);
+
+            prompt.Answer("hunter2");
+            Assert.IsTrue(waiting.Wait(BoundedWait));
+        }
+    }
+
+    [TestMethod]
+    public void Get_DialogCouldNotBeShown_ReturnsNullInsteadOfThrowing()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+        using (source)
+        {
+            prompt.Fail(new InvalidOperationException("no desktop"));
+
+            Assert.IsTrue(waiting.Wait(BoundedWait));
+            Assert.IsNull(waiting.Result);
+        }
+    }
+
+    [TestMethod]
+    public void Get_AfterACancelledDialog_AsksAgain()
+    {
+        var (waiting, prompt, source) = StartWaiting();
+        using (source)
+        {
+            prompt.Answer(null);
+            Assert.IsTrue(waiting.Wait(BoundedWait));
+
+            // The cancelled dialog leaves the pending slot asynchronously, so a Get right at that
+            // moment can still see it (and return null once); the next one opens a new dialog.
+            prompt.Enqueue("second-try");
+            byte[]? next = null;
+            var deadline = DateTime.UtcNow + BoundedWait;
+            while (next is null && DateTime.UtcNow < deadline)
+            {
+                next = source.Get(Db, 1);
+                if (next is null)
+                {
+                    Thread.Sleep(20);
+                }
+            }
+
+            Assert.AreEqual("second-try", Text(next));
+            Assert.HasCount(2, prompt.Asks);
+            Assert.AreEqual(1, prompt.Asks[1].Attempt);
+        }
+    }
+
+    // --- together with the vault ---
 
     [TestMethod]
     public void WithVault_RejectedHeldPassword_IsReplacedByAFreshPrompt()
