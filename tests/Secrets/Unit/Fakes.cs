@@ -58,28 +58,36 @@ internal sealed class FakePasswordSource : IPasswordSource
 }
 
 /// <summary>
-/// Replays queued password entries (null = the user cancelled) and records each ask. Keeps the arrays
-/// it hands out, so a test can check they were zeroed once dropped.
+/// A stand-in for the dialog. Answers can be queued in advance (<see cref="Enqueue"/>: the next ask
+/// completes at once, null = the user cancelled), or the test can leave an ask <i>open</i> and answer or
+/// cancel it later by hand (<see cref="Answer"/>, <see cref="Fail"/>) -- like a person taking their time.
+/// Honors the cancellation token the way the real dialog does (closing it completes the ask with null).
+/// Keeps the arrays it hands out, so a test can check they were zeroed once dropped.
 /// </summary>
 internal sealed class FakePasswordPrompt : IPasswordPrompt
 {
     private readonly Queue<string?> _answers = new();
+    private readonly List<TaskCompletionSource<byte[]?>> _open = new();
 
     public List<(string DatabasePath, int Attempt, int MaxAttempts)> Asks { get; } = new();
 
     public List<byte[]> Handed { get; } = new();
 
-    /// <summary>When set, <see cref="Ask"/> blocks on it after recording the ask (to hold a dialog "open").</summary>
-    public ManualResetEventSlim? Gate { get; set; }
-
+    /// <summary>Set when the first ask arrives (so a test can wait for "the dialog is up").</summary>
     public ManualResetEventSlim Asked { get; } = new(initialState: false);
+
+    /// <summary>True once the cancellation token of any ask has fired (the dialog was closed on shutdown).</summary>
+    public bool WasCancelled { get; private set; }
 
     public void Enqueue(string? password)
     {
-        _answers.Enqueue(password);
+        lock (_answers)
+        {
+            _answers.Enqueue(password);
+        }
     }
 
-    public byte[]? Ask(string databasePath, int attempt, int maxAttempts)
+    public Task<byte[]?> AskAsync(string databasePath, int attempt, int maxAttempts, CancellationToken cancellation)
     {
         lock (Asks)
         {
@@ -87,20 +95,69 @@ internal sealed class FakePasswordPrompt : IPasswordPrompt
         }
 
         Asked.Set();
-        Gate?.Wait();
 
-        string? answer;
+        string? queued;
+        var hasQueued = false;
         lock (_answers)
         {
-            answer = _answers.Dequeue();
+            hasQueued = _answers.TryDequeue(out queued);
         }
 
-        if (answer is null)
+        if (hasQueued)
+        {
+            return Task.FromResult(Record(queued));
+        }
+
+        var open = new TaskCompletionSource<byte[]?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_open)
+        {
+            _open.Add(open);
+        }
+
+        cancellation.Register(CloseOnCancel, open);
+        return open.Task;
+    }
+
+    /// <summary>The person types <paramref name="password"/> (or cancels with null) into the oldest open dialog.</summary>
+    public void Answer(string? password)
+    {
+        TaskCompletionSource<byte[]?> target;
+        lock (_open)
+        {
+            target = _open[0];
+            _open.RemoveAt(0);
+        }
+
+        target.TrySetResult(Record(password));
+    }
+
+    /// <summary>The oldest open dialog could not be shown.</summary>
+    public void Fail(Exception error)
+    {
+        TaskCompletionSource<byte[]?> target;
+        lock (_open)
+        {
+            target = _open[0];
+            _open.RemoveAt(0);
+        }
+
+        target.TrySetException(error);
+    }
+
+    private void CloseOnCancel(object? state)
+    {
+        WasCancelled = true;
+        ((TaskCompletionSource<byte[]?>)state!).TrySetResult(null);
+    }
+
+    private byte[]? Record(string? password)
+    {
+        if (password is null)
         {
             return null;
         }
 
-        var bytes = Encoding.UTF8.GetBytes(answer);
+        var bytes = Encoding.UTF8.GetBytes(password);
         lock (Handed)
         {
             Handed.Add(bytes);

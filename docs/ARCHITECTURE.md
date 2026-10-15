@@ -490,22 +490,29 @@ in the issue).
 ` or `
 `, exact
   case-sensitive key); a missing, duplicated, or empty key is an error.
-- `PromptedPassword` (`IPasswordSource`, issue #53): asks an `IPasswordPrompt` for the master
-  password and **holds** it (pinned bytes) until Service exits (`Dispose`) -- no TTL of its own.
-  Callers get copies; `Rejected()` drops it so the next attempt prompts again (a held password that
-  stopped working re-prompts rather than failing); a cancel/timeout clears it and returns null; it is
-  only reused for the same database; one dialog at a time (a concurrent second caller waits, then
-  reuses the answer).
-- `Platform/{Windows,Linux,Neutral}/PasswordPrompt.cs` (`IPasswordPrompt`): Windows shows a modal,
+- `PromptedPassword` (`IPasswordSource`, issues #53 and #66): asks an `IPasswordPrompt` for the master
+  password and **holds** it (pinned bytes) until Service exits (`Dispose`) -- no TTL of its own. **A launch
+  that needs the password waits for the answer however long that takes** ("if the secrets are not ready,
+  wait for them"); `Get` returns only when the user has answered or cancelled, or `Dispose` closes the
+  dialog. A slow answer can outlast the MCP client's connect timeout (`MCP_TIMEOUT`, 60 s here), but it is
+  held either way, so the reconnect gets it at once. One dialog at a time: a second launch joins the open
+  one (same database) and never opens another. Callers get copies; `Rejected()` drops the held password so
+  the next attempt asks again (a held password that stopped working re-prompts rather than failing); a
+  cancelled or failed dialog holds nothing and returns null (the launch goes on without the secret, per the
+  invariants above); only reused for the same database. Delivering the secrets *asynchronously* instead
+  (so a launch never waits) is a deferred idea: [issue #67](https://github.com/croicu/desk-tools/issues/67).
+- `Platform/{Windows,Linux,Neutral}/PasswordPrompt.cs` (`IPasswordPrompt.AskAsync`): Windows shows a modal,
   topmost dialog through P/Invoke `DialogBoxIndirectParam` over an in-memory template
-  (`Platform/Windows/DialogTemplate.cs`, unit-tested by walking the byte layout) -- no WinForms/WPF.
-  It shows the database path and "attempt N of 3", masks the edit box (`ES_PASSWORD`), closes itself
-  after a timeout (default 2 minutes, a `WM_TIMER`), and runs on its own STA thread. The password goes
-  into pinned `char[]`/`byte[]` buffers (never a `string`), the char buffer is zeroed and the edit box
-  cleared before it closes. Because Service is elevated, so is the window: a medium-integrity process
-  can't script it or read the box (UIPI). Not DPI-aware, English only. Linux/Neutral throw `AppError`
-  (#51). The Windows tests drive the real dialog by sending it messages, tagged `Integration` and
-  not parallelized.
+  (`Platform/Windows/DialogTemplate.cs`, unit-tested by walking the byte layout) -- no WinForms/WPF. It
+  returns a task at once and runs the dialog on its own STA thread. **The dialog never times out** (a timer
+  could close it while the person is typing): it stays up until the user answers or cancels it, or the
+  cancellation token fires (`PromptedPassword.Dispose`, so Service exit leaves no orphaned dialog and no
+  launch blocked forever). It shows the database path and "attempt N of 3", masks the edit box
+  (`ES_PASSWORD`), and the password goes into pinned `char[]`/`byte[]` buffers (never a `string`), the char
+  buffer zeroed and the edit box cleared before it closes. Because Service is elevated, so is the window: a
+  medium-integrity process can't script it or read the box (UIPI). Not DPI-aware, English only.
+  Linux/Neutral throw `AppError` (#51). The Windows tests drive the real dialog (tagged `Integration`, not
+  parallelized), including that it stays open and that cancelling the token closes it.
 - `DatabaseLocation` ([issue #61](https://github.com/croicu/desk-tools/issues/61)): finds the KeePass
   database. The saved `secrets.databasePath` (via `DatabasePathStore`: read through `Settings.Section`, written
   with `UserSettings.Set`, i.e. the per-user file) is used as-is and the file picker is **not** invoked; only a

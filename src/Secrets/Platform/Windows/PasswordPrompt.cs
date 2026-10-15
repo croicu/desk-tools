@@ -9,15 +9,19 @@ namespace Croicu.Desk.Tools.Secrets;
 /// <summary>
 /// The master-password dialog, via Win32 <c>DialogBoxIndirectParam</c> over the in-memory template
 /// from <see cref="DialogTemplate"/> -- P/Invoke only, no WinForms/WPF (issue #50). Modal, topmost, and
-/// on its own STA thread so the calling pool thread never owns a window. Because Service is an
-/// elevated process, this window is elevated too: a medium-integrity process can't script it or read
+/// on its own STA thread, so the caller never owns a window and never blocks on it. Because Service is
+/// an elevated process, this window is elevated too: a medium-integrity process can't script it or read
 /// its edit box (UIPI), which is the point of asking here and not in Desk or Claude Code.
+///
+/// <b>The dialog never times out</b> (issue #66): it stays up until the user answers or cancels it, or
+/// the cancellation token passed to <see cref="AskAsync"/> fires (Service shutting down). A timer that
+/// closed it could close it while the person is typing. A tool launch that needs the answer simply waits
+/// for it, however long that takes -- see <see cref="PromptedPassword"/>.
 ///
 /// The password is read straight into pinned <c>char[]</c>/<c>byte[]</c> buffers, never a
 /// <see cref="string"/>, the char buffer is zeroed, and the edit box is cleared before the dialog
-/// closes. A <c>WM_TIMER</c> closes the dialog after the timeout (default two minutes), since a
-/// <c>desk mcp</c> call is waiting on it. Known limits, accepted: not DPI-aware (Service is a hidden
-/// background process) and English only.
+/// closes. Known limits, accepted: not DPI-aware (Service is a hidden background process) and English
+/// only.
 ///
 /// Lives under <c>Platform/Windows/</c>; the Linux/Neutral variants are placeholders that throw (see
 /// issue #51).
@@ -25,56 +29,50 @@ namespace Croicu.Desk.Tools.Secrets;
 [SupportedOSPlatform("windows")]
 internal sealed class PasswordPrompt : IPasswordPrompt
 {
-    internal const int DefaultTimeoutSeconds = 120;
-
     private const string Category = LogCategory.Secrets;
 
     private const int PasswordLimit = 1024;
-    private const int TimerId = 1;
 
     private const uint WmInitDialog = 0x0110;
     private const uint WmCommand = 0x0111;
-    private const uint WmTimer = 0x0113;
-    private const uint WmDestroy = 0x0002;
     private const uint EmSetLimitText = 0x00C5;
     private const int GwlpUserData = -21;
     private static readonly IntPtr HwndTopmost = new(-1);
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
 
-    private readonly TimeSpan _timeout;
-
-    internal PasswordPrompt(TimeSpan? timeout = null)
-    {
-        _timeout = timeout ?? TimeSpan.FromSeconds(DefaultTimeoutSeconds);
-    }
-
-    public byte[]? Ask(string databasePath, int attempt, int maxAttempts)
+    public Task<byte[]?> AskAsync(string databasePath, int attempt, int maxAttempts, CancellationToken cancellation)
     {
         Logger.Info($"secrets: asking for the master password for '{databasePath}' (attempt {attempt + 1} of {maxAttempts}).", Category);
 
-        var state = new DialogState(DialogTemplate.Build(databasePath, attempt, maxAttempts), _timeout);
+        var state = new DialogState(DialogTemplate.Build(databasePath, attempt, maxAttempts), databasePath);
+
+        // Registered before the thread starts so a token that is already cancelled still closes the
+        // dialog (RequestCancel sets a flag that OnInitDialog checks once the window exists).
+        state.CancellationRegistration = cancellation.Register(RequestCancel, state);
 
         var thread = new Thread(RunDialog) { IsBackground = true, Name = "password-prompt" };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start(state);
-        thread.Join();
 
-        if (state.Error is not null)
-        {
-            throw state.Error;
-        }
+        return state.Completion.Task;
+    }
 
-        switch (state.Outcome)
+    /// <summary>
+    /// Closes the dialog on behalf of the cancellation token. Runs on whatever thread cancels, so it
+    /// only sets a flag and posts a message (never touches the dialog directly). Either this sees the
+    /// window (posts Cancel) or <see cref="OnInitDialog"/> sees the flag (ends itself) -- whichever
+    /// happens second observes the other.
+    /// </summary>
+    private static void RequestCancel(object? argument)
+    {
+        var state = (DialogState)argument!;
+        state.CancelRequested = true;
+
+        var window = state.Window;
+        if (window != IntPtr.Zero)
         {
-            case DialogOutcome.Entered:
-                return state.Password;
-            case DialogOutcome.TimedOut:
-                Logger.Warning($"secrets: the master password prompt for '{databasePath}' timed out after {_timeout.TotalSeconds:F0}s.", Category);
-                return null;
-            default:
-                Logger.Info($"secrets: the master password prompt for '{databasePath}' was cancelled.", Category);
-                return null;
+            NativeMethods.PostMessage(window, WmCommand, new IntPtr(DialogTemplate.IdCancel), IntPtr.Zero);
         }
     }
 
@@ -100,6 +98,26 @@ internal sealed class PasswordPrompt : IPasswordPrompt
         finally
         {
             handle.Free();
+            state.CancellationRegistration.Dispose();
+            Finish(state);
+        }
+    }
+
+    /// <summary>Completes the task the caller holds, exactly once, with whatever the dialog ended with.</summary>
+    private static void Finish(DialogState state)
+    {
+        if (state.Error is not null)
+        {
+            state.Completion.TrySetException(state.Error);
+        }
+        else if (state.Outcome == DialogOutcome.Entered)
+        {
+            state.Completion.TrySetResult(state.Password);
+        }
+        else
+        {
+            Logger.Info($"secrets: the master password prompt for '{state.DatabasePath}' was cancelled.", Category);
+            state.Completion.TrySetResult(null);
         }
     }
 
@@ -118,18 +136,6 @@ internal sealed class PasswordPrompt : IPasswordPrompt
                 case WmCommand:
                     OnCommand(window, (int)((long)wParam & 0xFFFF));
                     return new IntPtr(1);
-                case WmTimer:
-                    if ((int)wParam == TimerId)
-                    {
-                        GetState(window).Outcome = DialogOutcome.TimedOut;
-                        End(window);
-                        return new IntPtr(1);
-                    }
-
-                    return IntPtr.Zero;
-                case WmDestroy:
-                    NativeMethods.KillTimer(window, TimerId);
-                    return IntPtr.Zero;
                 default:
                     return IntPtr.Zero;
             }
@@ -147,10 +153,17 @@ internal sealed class PasswordPrompt : IPasswordPrompt
         var state = (DialogState)GCHandle.FromIntPtr(lParam).Target!;
         NativeMethods.SetWindowLongPtr(window, GwlpUserData, lParam);
 
-        NativeMethods.SetTimer(window, TimerId, (uint)state.Timeout.TotalMilliseconds, IntPtr.Zero);
-
         var edit = NativeMethods.GetDlgItem(window, DialogTemplate.IdPassword);
         NativeMethods.SendMessage(edit, EmSetLimitText, new IntPtr(PasswordLimit), IntPtr.Zero);
+
+        // Publish the window first, then look for a cancel that arrived before it existed.
+        state.Window = window;
+        if (state.CancelRequested)
+        {
+            state.Outcome = DialogOutcome.Cancelled;
+            End(window);
+            return new IntPtr(1);
+        }
 
         // A hidden background process isn't allowed to take the foreground freely, so also make the
         // window topmost: it must at least be visible. Returning FALSE tells the dialog manager that
@@ -224,20 +237,39 @@ internal sealed class PasswordPrompt : IPasswordPrompt
     {
         Cancelled,
         Entered,
-        TimedOut,
     }
 
     private sealed class DialogState
     {
-        internal DialogState(byte[] template, TimeSpan timeout)
+        private long _window;
+        private volatile bool _cancelRequested;
+
+        internal DialogState(byte[] template, string databasePath)
         {
             Template = template;
-            Timeout = timeout;
+            DatabasePath = databasePath;
         }
 
         internal byte[] Template { get; }
 
-        internal TimeSpan Timeout { get; }
+        internal string DatabasePath { get; }
+
+        internal TaskCompletionSource<byte[]?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal CancellationTokenRegistration CancellationRegistration { get; set; }
+
+        /// <summary>The dialog's window handle, set once it exists (read from the cancelling thread).</summary>
+        internal IntPtr Window
+        {
+            get => new(Volatile.Read(ref _window));
+            set => Volatile.Write(ref _window, value.ToInt64());
+        }
+
+        internal bool CancelRequested
+        {
+            get => _cancelRequested;
+            set => _cancelRequested = value;
+        }
 
         internal DialogOutcome Outcome { get; set; } = DialogOutcome.Cancelled;
 
@@ -262,11 +294,10 @@ internal sealed class PasswordPrompt : IPasswordPrompt
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        internal static extern UIntPtr SetTimer(IntPtr window, int id, uint elapseMilliseconds, IntPtr timerFunction);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        internal static extern bool KillTimer(IntPtr window, int id);
+        // Posted, not sent: this is called from the cancelling thread, which must never block on (or
+        // wait for) the dialog's own thread.
+        [DllImport("user32.dll")]
+        internal static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
         internal static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
