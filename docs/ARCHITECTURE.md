@@ -262,7 +262,9 @@ Service"`) rather than launching `Service.dll` as a plain child process -- `Host
 the scheduled task's own elevated integrity level (`installer/Package.wxs`'s `/rl highest`), and a
 plain `Process.Start` from Desk would instead run it at Desk's own (typically lower) integrity,
 defeating that. `schtasks /run` itself needs no elevation from the caller; Task Scheduler runs the
-task under its own configured principal regardless. Polls (a real `ping`, not just a raw TCP
+task under its own configured principal regardless. `schtasks`' own output is captured, never inherited: for
+`desk mcp` Desk's stdout is the MCP protocol stream, and its "SUCCESS: Attempted to run..." line would otherwise
+be the first thing the client reads. Polls (a real `ping`, not just a raw TCP
 connect) until reachable or a bounded timeout elapses, throwing `AppError` either way on failure --
 including when Service was never installed at all (the scheduled task isn't registered), a
 deliberate limitation: silently falling back to an unprivileged spawn would be exactly the mistake
@@ -294,7 +296,18 @@ Invalid declarations (a missing field, a double quote or backslash, since the fr
 text) fail the build. `McpToolLauncher.ParseFragment` reads the array back into typed declarations and, per the
 invariants above, **never throws and never blocks the launch** over it: a malformed declaration (bad variable
 name, a repeat, one the fragment's own `env` already sets, `DESK_PARENT_PID`) is skipped with a warning and the
-tool starts without it. Parsing only for now -- nothing resolves a value yet (the next slice).
+tool starts without it.
+
+**Delivery** ([issue #73](https://github.com/croicu/desk-tools/issues/73)): when `McpToolLauncher.Launch` has
+parsed a fragment, `SecretEnvironment.Resolve` asks the `ISecretBroker` `Host` was constructed with for each
+declared entry (one read per entry, each key once) and `Launch` adds the answers to the tool's `env`
+(`ToolLauncher` still sets `DESK_PARENT_PID` last). **The launch waits for the answer** -- the broker may show the
+master-password dialog, which never times out (issue #66) -- and is **never failed by it**: no broker (a non-Windows
+Service, or a test), no KeePassXC, a cancelled dialog, a missing entry or key, anything else, and the tool starts
+without the variables that failed, with a warning naming the tool, entry and variables (never a value). Each entry
+is read on its own, so a bad one does not cost the others. A later launch reuses the held master password, so the
+dialog appears once per Service run. `Program.Run` creates the one `SecretBroker` for the process (Windows only)
+and disposes it on exit, which closes an open dialog.
 
 `src/Directory.Build.targets`'s `GenerateMcpRegistryEntry` target (see `docs/PROTOCOL.md`'s MCP
 tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/29)): a first,
@@ -470,10 +483,13 @@ Secrets design first assumed: the file picker will record `secrets.databasePath`
 `src/Secrets/` (`Secrets.dll`, namespace `Croicu.Desk.Tools.Secrets`, [issue #50](https://github.com/croicu/desk-tools/issues/50)):
 reads credentials out of the user's KeePassXC database so an elevated MCP tool can use a secret
 without any value reaching a medium-integrity process. References `Base.csproj` only; types are
-`internal`. **Slices 1-3 only (retrieval core, the master-password prompt, and finding the database)** -- nothing in
-`src/Service` uses it yet, and `Service.csproj` does not reference it until the wiring slice (the
-design, including `<McpSecret>` declarations and `ToolLauncher` delivery via environment variables, is
-in the issue).
+`internal` except the public surface a host needs (Architecture convention 7): `ISecretBroker`
+(`Interfaces.cs`: `Read(entry, keys)` -> key/value text, throws `AppError` on any failure) and its real
+implementation `SecretBroker`, which `src/Service` uses (`Service.csproj` references this project; see the
+"Delivery" paragraph above). `SecretBroker` composes everything below lazily -- nothing is looked up until the first
+`Read`, so a machine without KeePassXC, or a Service with no secret-declaring tool, never notices -- and serializes
+finding the database so two launches never open two file pickers. Its parameterless constructor is Windows-only
+(`[SupportedOSPlatform]`): the dialogs are Win32.
 
 - `Vault.Read(entry, keys)`: the broker. Asks an injected `IPasswordSource` for the master password
   (up to three attempts, telling the source when one is rejected), has `KeePassCli` read the entry's
@@ -540,6 +556,16 @@ in the issue).
   into pinned buffers zeroed as they are outgrown, never through a `StreamReader`, so a caller can
   zero what it was handed. Secrets are byte arrays the caller zeroes -- a value only becomes a
   `string` where it must, in the launched tool's environment block.
+- `tests/Apps/McpSecrets` (`McpSecrets.App`, not shipped; [issue #73](https://github.com/croicu/desk-tools/issues/73)):
+  checks secret delivery end to end through the real chain. It writes a throwaway registry holding an
+  `echo-secret` tool that declares one secret (`scripts/echo-secret.py`: a plain stdio script that answers each
+  line with `PROBE_SECRET=<value>` -- not an MCP server; Service neither knows nor cares what it launches), runs
+  `desk mcp echo-secret --registry <dir>` (the per-call registry, issue #69), sends it a line and prints the
+  answer, exit code 0 if the secret arrived. Needs `settings.allowCallerRegistry` on, `python`, KeePassXC and a
+  database holding `ntfy`/`desk-pager` (the dummy one: `tests/data/Secrets.kdbx`, master password
+  `password`; pick it in the file dialog when none is configured). Options: `--desk`, `--entry`, `--key`,
+  `--expect`, `--timeout` (default 300s: the password dialog never times out). The dialog is Service's own, which
+  the installed scheduled task runs elevated -- type the password yourself; a script cannot (UIPI).
 - `tests/Apps/Secrets` (`Secrets.App`, not shipped): a manual command-line driver. `Secrets.App
   [--picker] [--user-settings <file>] [databasePath] [entry] [key]` (all optional; defaults to the dummy
   database, `ntfy`, `desk-pager`) shows the real password dialog, reads the secret through the whole stack, and
@@ -550,7 +576,7 @@ in the issue).
   `internal` Secrets types through an `InternalsVisibleTo`. Windows only (exits 2 elsewhere).
 - Tests: `tests/Secrets/Unit/` (offline, fakes) and `tests/Secrets/Integration/`
   (`[TestCategory("Integration")]`, real `keepassxc-cli` against the dummy
-  `tests/Secrets/data/Secrets.kdbx`, master password `password`; Inconclusive when KeePassXC isn't
+  `tests/data/Secrets.kdbx`, master password `password`; Inconclusive when KeePassXC isn't
   installed machine-wide). No database is shipped: a known-password file in Program Files would be
   readable by exactly the processes the design keeps out.
 

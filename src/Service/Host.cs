@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Secrets;
 
 namespace Croicu.Desk.Tools.Service;
 
@@ -85,6 +86,7 @@ internal sealed class Host
     private readonly object _activityLock = new();
 
     private readonly string? _mcpRegistryBaseDirectory;
+    private readonly ISecretBroker? _secrets;
 
     // Watch-only handles (no stdio) to tools already handed off to a client -- see TrackChild.
     private readonly List<Process> _children = [];
@@ -103,8 +105,9 @@ internal sealed class Host
     /// default, Service's real behavior) -- same pattern as <paramref name="port"/>, lets a test
     /// point this at a throwaway registry fixture instead of the real, build-generated one.
     /// </summary>
-    public Host(ISettingsProvider settings, int? port = null, string? mcpRegistryBaseDirectory = null)
+    public Host(ISettingsProvider settings, int? port = null, string? mcpRegistryBaseDirectory = null, ISecretBroker? secrets = null)
     {
+        _secrets = secrets;
         _settings = settings;
         _listener = new TcpListener(IPAddress.Loopback, port ?? settings.Port);
         _mcpRegistryBaseDirectory = mcpRegistryBaseDirectory;
@@ -361,7 +364,7 @@ internal sealed class Host
         ToolProcess? tool = null;
         try
         {
-            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory, callerRegistryDirectory);
+            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory, callerRegistryDirectory, _secrets);
             var (stdin, stdout) = HandleDuplicator.Duplicate(tool, processId);
             TrackChild(name, tool.OpenWatchHandle());
             tool.DisownAfterHandoff();

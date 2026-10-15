@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Base\Base.csproj" />
+    <ProjectReference Include="..\Secrets\Secrets.csproj" />
   </ItemGroup>
 
   <!-- Platform-specific console handling (AllocConsole on Windows, no-op on Linux/Neutral):

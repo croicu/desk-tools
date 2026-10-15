@@ -1,4 +1,5 @@
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Secrets;
 
 namespace Croicu.Desk.Tools.Service;
 
@@ -46,10 +47,28 @@ public static class Program
             Logger.Warning("desk-tools: the previous instance's single-instance guard was abandoned (it likely crashed); proceeding anyway.");
         }
 
-        new Host(Settings.Current).Run();
+        // Held for the whole run: the master password is asked for once, and disposing closes any open dialog.
+        using var secrets = CreateSecretBroker();
+        new Host(Settings.Current, secrets: secrets).Run();
         Logger.Info("desk-tools: completed.");
 
         return 0;
+    }
+
+    /// <summary>
+    /// The secret broker tools' declared secrets are resolved through (issue #50). Windows only today:
+    /// elsewhere there is none, and a tool that declares secrets launches without them (with a warning),
+    /// the same as on any other failure to resolve them.
+    /// </summary>
+    private static SecretBroker? CreateSecretBroker()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Logger.Info("desk-tools: secrets are not supported on this platform yet; tools launch without their declared secrets.");
+            return null;
+        }
+
+        return new SecretBroker();
     }
 
     /// <summary>

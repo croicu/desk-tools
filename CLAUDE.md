@@ -456,7 +456,8 @@ dotnet build installer/Setup.wixproj
 
 - **Secrets** -- [issue #50](https://github.com/croicu/desk-tools/issues/50): give elevated MCP tools
   credentials from the user's KeePassXC database without any secret value reaching a
-  medium-integrity process. In Implementation (slice 1: retrieval core); the issue holds the design.
+  medium-integrity process. In Implementation (slices 1-4a merged; 4b, Service delivering declared secrets as environment
+  variables, is [issue #73](https://github.com/croicu/desk-tools/issues/73)); the issue holds the design.
 
 ## Pending Tasks
 
