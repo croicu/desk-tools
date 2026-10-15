@@ -235,6 +235,14 @@ this registry is one file per tool, so there's no such key to borrow one from):
   directory" already covers a subfolder path like any other relative path (see that project's own
   remarks).
 - `env` (object) -- always `{}` for now; nothing needs a per-tool env var yet. (Service additionally sets `DESK_PARENT_PID` itself at launch, not via the registry -- see `docs/ARCHITECTURE.md`.)
+- `secrets` (array, **optional**; absent when a tool declares none) -- the secrets the tool would like in its
+  environment, each `{"env": "NTFY_TOPIC", "entry": "ntfy", "key": "desk-pager"}`: the environment variable it
+  arrives in, the KeePass entry (full group path), and the `key: value` line in that entry's Notes. Generated
+  from `<McpSecret>` items (see `docs/ARCHITECTURE.md`'s `ComputeMcpSecretsFragment` entry) and **only
+  declarations -- never a value**. Like the whole manifest it is optional and never gates a launch
+  (`docs/ARCHITECTURE.md`, "Invariants for MCP tools"): a malformed declaration (a missing or empty field, an
+  invalid or repeated variable name, one the fragment's own `env` already sets, or `DESK_PARENT_PID`) is skipped
+  with a warning and the tool starts without it.
 
 `src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools
 registered so far -- both real MSBuild machinery in the end, just two different opt-in mechanisms

@@ -2,6 +2,33 @@
 
 Modules, data flow, and contracts for `desk-tools`.
 
+## Invariants for MCP tools
+
+These hold for every MCP tool in this repo, and for Service itself. They are not specific to any one
+feature (secrets was just the first place they had to be spelled out), so new tools and new Service
+capabilities are expected to keep to them.
+
+1. **Service is a convenience, never a gate.** Every MCP tool must be launchable and useful without
+   Service -- straight from `.mcp.json` (e.g. `"command": "pager"` for a standalone tool, or
+   `dotnet Hello.dll`). Service and its registry add capabilities (running elevated, delivering
+   secrets, ...); they are never a prerequisite. A tool therefore ships as a self-contained
+   executable that does not reference Service, Desk, or `Secrets.dll`.
+2. **The manifest is optional, and so is every part of it.** The registry fragment
+   (`mcp-registry/<name>.json`) is what Service reads to launch a tool on someone's behalf; a tool runs
+   without one. Inside a fragment only what Service needs to launch it (`command`) is mandatory. An
+   optional part (the `secrets` array today) that is malformed, or that cannot be honored, costs only
+   that capability: it is skipped with a warning that names the problem, and the tool still starts.
+3. **A missing capability degrades the tool; it never blocks it.** A tool takes what it needs from its
+   environment (an environment variable, say) and handles its absence itself -- the affected tool call
+   answers "not configured", the tool still starts. Service in turn never fails a launch because an
+   optional capability could not be provided (a cancelled password prompt, a wrong master password, a
+   missing KeePass entry or key, an unreadable database): it launches the tool without that variable and
+   logs a warning.
+4. **Developer mistakes fail the build; run-time conditions never block the user.** A declaration with a
+   missing field or a character that would corrupt the generated JSON fails the *build* (cheapest place to
+   fix it). Anything that can differ from machine to machine or session to session -- the case in
+   point 3 -- never does.
+
 ## Modules
 
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Context/Errors/
@@ -255,6 +282,19 @@ not on CI (`CI=true`), not with `DESK_TOOLS_SKIP_SHUTDOWN=1`, only when the mach
 `Desk Tools\Desk.exe` exists, and only when a `Service.exe` is running (so a build with nothing to
 stop doesn't make Desk fail on connect). Never fails the build. The cost is that the MCP servers show
 as disconnected afterward (reconnect with `/mcp`).
+
+`src/Directory.Build.targets`'s `ComputeMcpSecretsFragment` target ([issue #64](https://github.com/croicu/desk-tools/issues/64)):
+renders a tool's `<McpSecret Include="ENV_VAR" Entry="..." Key="..." />` items (the environment variable, the
+KeePass entry, the key in its Notes) into the registry fragment's optional `"secrets"` array, spliced in by both
+generate targets; a tool with no declarations gets a fragment byte-identical to before. Python tools declare the
+same item in `scripts/Scripts.csproj` with an extra `Tool="<name>"` metadata (`ValidateMcpPythonSecrets` also
+checks that name exists, so a typo cannot silently declare nothing; the per-tool filtering captures the batch's
+tool name in a property first -- an item-function argument does not expand `%(McpPythonTool.Identity)`).
+Invalid declarations (a missing field, a double quote or backslash, since the fragment is written as raw JSON
+text) fail the build. `McpToolLauncher.ParseFragment` reads the array back into typed declarations and, per the
+invariants above, **never throws and never blocks the launch** over it: a malformed declaration (bad variable
+name, a repeat, one the fragment's own `env` already sets, `DESK_PARENT_PID`) is skipped with a warning and the
+tool starts without it. Parsing only for now -- nothing resolves a value yet (the next slice).
 
 `src/Directory.Build.targets`'s `GenerateMcpRegistryEntry` target (see `docs/PROTOCOL.md`'s MCP
 tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/29)): a first,
