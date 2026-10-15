@@ -45,18 +45,31 @@ internal static class ServiceLauncher
     {
         Logger.Info($"desk: starting the service via the scheduled task ('{ScheduledTaskName}').");
 
-        var startInfo = new ProcessStartInfo("schtasks") { UseShellExecute = false };
+        // Output is captured, never inherited: for `desk mcp` Desk's own stdout is the MCP protocol stream, and
+        // schtasks' "SUCCESS: Attempted to run the scheduled task..." line would otherwise be the first thing
+        // the client reads from it.
+        var startInfo = new ProcessStartInfo("schtasks")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
         startInfo.ArgumentList.Add("/run");
         startInfo.ArgumentList.Add("/tn");
         startInfo.ArgumentList.Add(ScheduledTaskName);
 
         using var schtasks = Process.Start(startInfo) ?? throw new AppError("could not auto-start the service: failed to launch schtasks.exe.");
 
+        // Both streams are a line or two, so reading them one after the other cannot fill a pipe.
+        var output = schtasks.StandardOutput.ReadToEnd().Trim();
+        var errors = schtasks.StandardError.ReadToEnd().Trim();
         schtasks.WaitForExit();
         if (schtasks.ExitCode != 0)
         {
-            throw new AppError($"could not auto-start the service: 'schtasks /run /tn \"{ScheduledTaskName}\"' exited with code {schtasks.ExitCode} -- is Service installed? (see installer/Package.wxs, issue #19)");
+            throw new AppError($"could not auto-start the service: 'schtasks /run /tn \"{ScheduledTaskName}\"' exited with code {schtasks.ExitCode} ({errors}) -- is Service installed? (see installer/Package.wxs, issue #19)");
         }
+
+        Logger.Diagnostic($"desk: schtasks: {output}");
 
         var deadline = DateTime.UtcNow + (timeout ?? DefaultStartupWait);
         while (DateTime.UtcNow < deadline)

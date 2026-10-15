@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Croicu.Desk.Tools.Base;
+using Croicu.Desk.Tools.Secrets;
 
 namespace Croicu.Desk.Tools.Service;
 
@@ -36,8 +37,10 @@ internal static class McpToolLauncher
     /// <c>&lt;it&gt;/mcp-registry/&lt;name&gt;.json</c> exists the tool is launched from there (its args and
     /// working directory resolve against that directory), otherwise the shipped registry is used. The
     /// caller (<c>Host</c>) is responsible for having checked that the caller may supply one at all.
+    /// <paramref name="secrets"/> resolves the tool's declared secrets into environment variables (issue #50);
+    /// null means none are delivered.
     /// </summary>
-    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null, string? callerRegistryDirectory = null)
+    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null, string? callerRegistryDirectory = null, ISecretBroker? secrets = null)
     {
         var baseDirectory = registryBaseDirectory ?? AppContext.BaseDirectory;
         var registryPath = Path.Combine(baseDirectory, RegistryDirName, $"{name}.json");
@@ -76,7 +79,15 @@ internal static class McpToolLauncher
         // also the correct working directory for the spawned process to resolve them against --
         // not AppContext.BaseDirectory, which only coincides with baseDirectory in the real,
         // non-test-seam case.
-        return ToolLauncher.Launch(fragment.Command, fragment.Args, fragment.Env, baseDirectory);
+        // Declared secrets become environment variables. May block while the user answers the master-password
+        // dialog (see SecretEnvironment); never fails the launch.
+        var env = new Dictionary<string, string>(fragment.Env);
+        foreach (var secret in SecretEnvironment.Resolve(name, fragment.Secrets, secrets))
+        {
+            env[secret.Key] = secret.Value;
+        }
+
+        return ToolLauncher.Launch(fragment.Command, fragment.Args, env, baseDirectory);
     }
 
     /// <summary>
@@ -134,8 +145,8 @@ internal static class McpToolLauncher
     /// Reads the optional <c>secrets</c> array (issue #50, slice 4a): one object per secret a tool
     /// declares it needs, <c>{"env": "NTFY_TOPIC", "entry": "ntfy", "key": "desk-pager"}</c> -- the
     /// environment variable it will arrive in, the KeePass entry, and the key inside that entry's
-    /// Notes. Missing means none. Only <i>declarations</i> are parsed here; nothing resolves a value
-    /// yet (the next slice), so no secret is read or logged.
+    /// Notes. Missing means none. Only <i>declarations</i> are parsed here; no secret is read or
+    /// logged (<see cref="SecretEnvironment"/> resolves them at launch).
     ///
     /// <b>Never throws, never blocks the launch.</b> The manifest is optional and Service is a
     /// convenience, not a gate: a tool must be able to run without what a declaration would have

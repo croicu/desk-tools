@@ -154,6 +154,16 @@ public sealed class PromptedPasswordTests
 
     // --- the person takes their time (the dialog is left open and answered by hand) ---
 
+    /// <summary>
+    /// Runs a launch that blocks in <see cref="PromptedPassword.Get"/> on its own thread, not a thread-pool
+    /// one: these tests block pool threads of their own while they wait, so under load (the whole solution
+    /// testing at once) a pooled launch could sit queued behind them past any timeout.
+    /// </summary>
+    private static Task<byte[]?> StartLaunch(Func<byte[]?> launch)
+    {
+        return Task.Factory.StartNew(launch, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    }
+
     private static (Task<byte[]?> Waiting, FakePasswordPrompt Prompt, PromptedPassword Source) StartWaiting()
     {
         var prompt = new FakePasswordPrompt();
@@ -161,8 +171,8 @@ public sealed class PromptedPasswordTests
 
         byte[]? GetPassword() => source.Get(Db, 0);
 
-        var waiting = Task.Run(GetPassword);
-        Assert.IsTrue(prompt.Asked.Wait(BoundedWait), "the dialog never opened.");
+        var waiting = StartLaunch(GetPassword);
+        Assert.IsTrue(prompt.Asked.Wait(BoundedWait), $"the dialog never opened (the launch is {waiting.Status}: {waiting.Exception?.GetBaseException().Message}).");
         return (waiting, prompt, source);
     }
 
@@ -192,7 +202,7 @@ public sealed class PromptedPasswordTests
         using (source)
         {
             byte[]? GetPassword() => source.Get(Db, 0);
-            var second = Task.Run(GetPassword);
+            var second = StartLaunch(GetPassword);
 
             // The second launch joins the open dialog; it must not open another one.
             Thread.Sleep(300);

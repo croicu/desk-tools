@@ -134,7 +134,9 @@ Three methods today:
 
 `Settings.Load()`/`Settings.Section()` (`src/Base/Settings.cs`) read these tiers, each overriding
 the previous key-by-key (`Settings.Load()`, the core `"settings"` object, reads tiers 1 and 3; the
-per-user tier 2 is read by `Settings.Section()` only -- see below):
+per-user tier 2 is read by `Settings.Section()` only -- see below). **Settings are read when a process
+starts**, so a change to any of these files takes effect only after the process is restarted -- for Service,
+`desk shutdown` and let the next `desk` call (or the scheduled task) start it again:
 
 1. `settings.json` next to the running module (`AppContext.BaseDirectory` -- e.g. the install
    directory of a deployed build). The base tier.
@@ -260,7 +262,10 @@ this registry is one file per tool, so there's no such key to borrow one from):
   declarations -- never a value**. Like the whole manifest it is optional and never gates a launch
   (`docs/ARCHITECTURE.md`, "Invariants for MCP tools"): a malformed declaration (a missing or empty field, an
   invalid or repeated variable name, one the fragment's own `env` already sets, or `DESK_PARENT_PID`) is skipped
-  with a warning and the tool starts without it.
+  with a warning and the tool starts without it. At launch Service reads each declared value from the user's
+  KeePassXC database and sets it as that environment variable (`docs/ARCHITECTURE.md`, "Delivery"); the launch
+  waits for the master-password dialog if it has to, and a failure or cancel starts the tool without the variable
+  (with a warning).
 
 `src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools
 registered so far -- both real MSBuild machinery in the end, just two different opt-in mechanisms
