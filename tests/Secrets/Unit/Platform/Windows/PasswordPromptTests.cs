@@ -106,6 +106,41 @@ public sealed class PasswordPromptTests
         Assert.IsNull(asking.Result);
     }
 
+    /// <summary>
+    /// The dialog is opened by a background process (Service, elevated, with no window of its own in front),
+    /// which Windows does not let simply take the foreground -- <c>SetForegroundWindow</c> alone only flashes the
+    /// taskbar button, and the user's typing goes to whatever was in front. So the dialog must really become the
+    /// foreground window with the keyboard focus already on the password box. Note this test cannot reproduce
+    /// the lock itself: a test host started from the foreground terminal is allowed to take the foreground, so it
+    /// passes even without the fix. The real scenario (another app in front, the dialog opened by the Task
+    /// Scheduler-started Service) was reproduced and verified by hand; this guards the end state.
+    /// </summary>
+    [TestMethod]
+    public void Ask_DialogShown_BecomesTheForegroundWindowWithFocusOnThePasswordBox()
+    {
+        var asking = StartAsking(new PasswordPrompt());
+        var window = WaitForDialog();
+        var edit = NativeMethods.GetDlgItem(window, DialogTemplate.IdPassword);
+
+        var focused = false;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline && !focused)
+        {
+            var info = new NativeMethods.GuiThreadInfo { Size = Marshal.SizeOf<NativeMethods.GuiThreadInfo>() };
+            focused = NativeMethods.GetForegroundWindow() == window
+                && NativeMethods.GetGUIThreadInfo(0, ref info)
+                && info.Focus == edit;
+            if (!focused)
+            {
+                Thread.Sleep(25);
+            }
+        }
+
+        Click(window, DialogTemplate.IdCancel);
+        Assert.IsTrue(asking.Wait(BoundedWait));
+        Assert.IsTrue(focused, "the dialog never became the foreground window with the password box focused.");
+    }
+
     [TestMethod]
     public void Ask_TokenCancelled_ClosesTheDialogAndCompletesWithNull()
     {
@@ -179,5 +214,28 @@ public sealed class PasswordPromptTests
 
         [DllImport("user32.dll", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
         internal static extern IntPtr SendMessageText(IntPtr window, uint message, IntPtr wParam, string text);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct GuiThreadInfo
+        {
+            public int Size;
+            public uint Flags;
+            public IntPtr Active;
+            public IntPtr Focus;
+            public IntPtr Capture;
+            public IntPtr MenuOwner;
+            public IntPtr MoveSize;
+            public IntPtr Caret;
+            public int CaretLeft;
+            public int CaretTop;
+            public int CaretRight;
+            public int CaretBottom;
+        }
     }
 }

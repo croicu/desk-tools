@@ -35,6 +35,9 @@ internal sealed class PasswordPrompt : IPasswordPrompt
 
     private const uint WmInitDialog = 0x0110;
     private const uint WmCommand = 0x0111;
+
+    // Posted to the dialog by OnInitDialog and handled once it is on screen: see TakeForeground.
+    private const uint WmTakeForeground = 0x8000 + 1;
     private const uint EmSetLimitText = 0x00C5;
     private const int GwlpUserData = -21;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -136,6 +139,9 @@ internal sealed class PasswordPrompt : IPasswordPrompt
                 case WmCommand:
                     OnCommand(window, (int)((long)wParam & 0xFFFF));
                     return new IntPtr(1);
+                case WmTakeForeground:
+                    TakeForeground(window);
+                    return new IntPtr(1);
                 default:
                     return IntPtr.Zero;
             }
@@ -165,13 +171,60 @@ internal sealed class PasswordPrompt : IPasswordPrompt
             return new IntPtr(1);
         }
 
-        // A hidden background process isn't allowed to take the foreground freely, so also make the
-        // window topmost: it must at least be visible. Returning FALSE tells the dialog manager that
-        // focus was already set here.
+        // A background process isn't allowed to take the foreground freely, so make the window topmost: it
+        // must at least be visible. Taking the foreground itself has to wait until the dialog is on screen
+        // (it is not yet, here), so it is posted to the dialog's own queue. Returning FALSE tells the dialog
+        // manager that focus was already set here.
         NativeMethods.SetWindowPos(window, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize);
-        NativeMethods.SetForegroundWindow(window);
         NativeMethods.SetFocus(edit);
+        NativeMethods.PostMessage(window, WmTakeForeground, IntPtr.Zero, IntPtr.Zero);
         return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Makes the dialog the foreground window, with the keyboard on the password box, so what the user types
+    /// goes into it (issue #76: they kept typing the password into whatever was in front). Service is
+    /// started by Task Scheduler, not by anything the user is working in, so Windows' foreground lock
+    /// refuses a plain <c>SetForegroundWindow</c> (it only flashes the taskbar button). The documented way
+    /// round it is to attach this thread's input to the foreground window's thread for the duration of the
+    /// call, which makes the two share input state; best effort -- if it still does not work the window is
+    /// topmost and visible, and the user can click it.
+    /// </summary>
+    private static void TakeForeground(IntPtr window)
+    {
+        var thisThread = NativeMethods.GetCurrentThreadId();
+        var foregroundThread = 0u;
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            foregroundThread = NativeMethods.GetWindowThreadProcessId(foreground, out _);
+        }
+
+        var attached = foregroundThread != 0 && foregroundThread != thisThread
+            && NativeMethods.AttachThreadInput(thisThread, foregroundThread, true);
+        try
+        {
+            NativeMethods.BringWindowToTop(window);
+            NativeMethods.SetForegroundWindow(window);
+            NativeMethods.SetFocus(NativeMethods.GetDlgItem(window, DialogTemplate.IdPassword));
+        }
+        finally
+        {
+            if (attached)
+            {
+                NativeMethods.AttachThreadInput(thisThread, foregroundThread, false);
+            }
+        }
+
+        var taken = NativeMethods.GetForegroundWindow() == window;
+        if (taken)
+        {
+            Logger.Diagnostic("secrets: the master password dialog has the foreground.", Category);
+        }
+        else
+        {
+            Logger.Warning("secrets: the master password dialog could not take the foreground; it is on top, click it to type.", Category);
+        }
     }
 
     private static void OnCommand(IntPtr window, int id)
@@ -304,6 +357,21 @@ internal sealed class PasswordPrompt : IPasswordPrompt
 
         [DllImport("user32.dll")]
         internal static extern bool SetForegroundWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
+        internal static extern bool BringWindowToTop(IntPtr window);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll")]
+        internal static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+
+        [DllImport("kernel32.dll")]
+        internal static extern uint GetCurrentThreadId();
 
         [DllImport("user32.dll")]
         internal static extern IntPtr SetFocus(IntPtr window);
