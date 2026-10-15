@@ -4,11 +4,13 @@ namespace Croicu.Desk.Tools.Base;
 
 /// <summary>
 /// Layered JSON settings: the module's own directory's <c>settings.json</c> (the base -- e.g. the
-/// file shipped alongside an installed build), then the working directory's own <c>settings.json</c>
-/// overriding it key-by-key (a per-deployment/per-invocation override), then -- for
-/// <see cref="Section"/> only -- the per-user file (<see cref="UserSettings"/>), then the working
-/// directory's <c>settings.local.json</c> overriding all of that (a personal, gitignored override
-/// file -- see .gitignore). Load once via <see cref="Load"/>, then read back via
+/// file shipped alongside an installed build), then -- for <see cref="Section"/> only -- the per-user
+/// file (<see cref="UserSettings"/>), then the module directory's <c>settings.local.json</c>
+/// overriding all of that (a personal, gitignored override file -- see .gitignore). Every default
+/// location is next to the running module, never relative to the current working directory: Service
+/// is elevated, so a cwd-relative file would let whoever can write there change its core settings
+/// (issue #70). The explicit <c>path</c> parameters exist for tests and embedding hosts, which choose
+/// the file themselves; nothing reads one by default. Load once via <see cref="Load"/>, then read back via
 /// <see cref="Current"/>. <see cref="Load"/> (the core <c>"settings"</c> object) never reads the
 /// per-user file: it is user-writable but read by an elevated Service, so it may only supply
 /// non-core sections (see <see cref="UserSettings"/>). Implements <see cref="ISettingsProvider"/> so
@@ -16,13 +18,14 @@ namespace Croicu.Desk.Tools.Base;
 /// </summary>
 public sealed record Settings : ISettingsProvider
 {
-    private const string DefaultSettingsPath = "./settings.json";
-    private const string DefaultLocalPath = "./settings.local.json";
     private const int DefaultPort = 51823;
 
     // AppContext.BaseDirectory is fixed for the lifetime of the process, so this is computed once
     // rather than re-resolved on every Load()/Section() call.
     private static readonly string DefaultModulePath = Path.Combine(AppContext.BaseDirectory, "settings.json");
+
+    // Next to the module, like DefaultModulePath -- deliberately not the working directory (issue #70).
+    private static readonly string DefaultLocalPath = Path.Combine(AppContext.BaseDirectory, "settings.local.json");
 
     // AsyncLocal rather than a plain static field: scopes "the current settings" to the logical
     // call context (flows across await continuations, doesn't leak into an unrelated concurrent
@@ -60,6 +63,11 @@ public sealed record Settings : ISettingsProvider
 
     public static Settings Current => CurrentInstance.Value ?? throw new InvalidOperationException("Settings.Load() must be called first.");
 
+    /// <summary>
+    /// <paramref name="path"/> is an optional extra <c>settings.json</c> layered over the module one
+    /// (tests, embedding hosts); null (the default) means none -- there is no cwd lookup (issue #70).
+    /// <paramref name="localPath"/> defaults to <c>settings.local.json</c> next to the module.
+    /// </summary>
     public static Settings Load(string? path = null, string? localPath = null, string? modulePath = null)
     {
         var debug = false;
@@ -72,7 +80,7 @@ public sealed record Settings : ISettingsProvider
         var port = DefaultPort;
         var allowCallerRegistry = false;
 
-        var payload = LoadPayload(modulePath ?? DefaultModulePath, path ?? DefaultSettingsPath, localPath ?? DefaultLocalPath);
+        var payload = LoadPayload(modulePath ?? DefaultModulePath, path, localPath ?? DefaultLocalPath);
 
         if (payload.Count > 0)
         {
@@ -200,15 +208,16 @@ public sealed record Settings : ISettingsProvider
 
     /// <summary>
     /// Returns one named top-level section of the settings files, merged key-by-key across the tiers
-    /// in order -- module <c>settings.json</c>, working-directory <c>settings.json</c>, the per-user
-    /// file (<paramref name="userPath"/>, default <see cref="UserSettings.DefaultPath"/>), then
-    /// <c>settings.local.json</c> -- later tiers overriding earlier ones. E.g. a plugin's or
+    /// in order -- module <c>settings.json</c>, the optional explicit <paramref name="path"/>, the
+    /// per-user file (<paramref name="userPath"/>, default <see cref="UserSettings.DefaultPath"/>),
+    /// then <c>settings.local.json</c> (default: next to the module) -- later tiers overriding earlier
+    /// ones. No tier is looked up relative to the working directory (issue #70). E.g. a plugin's or
     /// subsystem's own config section living as a sibling of the core "settings" object, not nested
     /// inside it. settings.json's shape is uniform across consumer repos, so this is the public entry
     /// point for a caller outside this class to reach its own section without knowing how the files
     /// are read or merged.
     ///
-    /// The module and working-directory tiers are strict (invalid JSON, or the section not being an
+    /// The module and explicit-path tiers are strict (invalid JSON, or the section not being an
     /// object, throws <see cref="SettingsError"/>); <c>settings.local.json</c> is lenient about bad
     /// JSON (logged and ignored) but a non-object section still throws; the per-user tier is lenient
     /// about both, since any process running as the user can write it and a bad file must not take
@@ -218,13 +227,12 @@ public sealed record Settings : ISettingsProvider
     public static Dictionary<string, JsonElement> Section(string name, string? path = null, string? localPath = null, string? modulePath = null, string? userPath = null)
     {
         modulePath ??= DefaultModulePath;
-        path ??= DefaultSettingsPath;
         localPath ??= DefaultLocalPath;
 
         var result = new Dictionary<string, JsonElement>();
 
         var moduleFound = MergeSection(result, name, modulePath, "module", lenientFile: false, lenientShape: false);
-        var pathFound = MergeSection(result, name, path, "working directory", lenientFile: false, lenientShape: false);
+        var pathFound = path is not null && MergeSection(result, name, path, "explicit", lenientFile: false, lenientShape: false);
 
         if (!moduleFound && !pathFound)
         {
@@ -232,7 +240,7 @@ public sealed record Settings : ISettingsProvider
             // file just means whatever section the caller asked for comes back empty (or from the
             // personal tiers below), not a run-wide behavior change -- so Info rather than Load()'s
             // Warning for the same both-missing condition.
-            Logger.Info($"no settings file found at module path '{modulePath}' or working directory '{path}'; {nameof(Section)} relies on the remaining tiers.", DiagnosticsCategories.Settings);
+            Logger.Info($"no settings file found at module path '{modulePath}'{DescribeExplicit(path)}; {nameof(Section)} relies on the remaining tiers.", DiagnosticsCategories.Settings);
         }
 
         var resolvedUserPath = userPath ?? UserSettings.DefaultPath;
@@ -306,17 +314,17 @@ public sealed record Settings : ISettingsProvider
     }
 
     /// <summary>
-    /// Reads the module-dir and working-directory settings.json's "settings" objects (module first,
-    /// working directory overriding it key-by-key), then the working directory's
-    /// settings.local.json's own "settings" object overriding that. Private -- Section() is the
-    /// public way for a caller outside this class to reach a section of the merged file.
+    /// Reads the module-dir settings.json's "settings" object, then the optional explicit
+    /// <paramref name="path"/>'s overriding it key-by-key, then the local file's own "settings"
+    /// object (default: next to the module) overriding that. Private -- Section() is the public way
+    /// for a caller outside this class to reach a section of the merged file.
     /// </summary>
-    private static Dictionary<string, JsonElement> LoadPayload(string modulePath, string path, string localPath)
+    private static Dictionary<string, JsonElement> LoadPayload(string modulePath, string? path, string localPath)
     {
         var payload = new Dictionary<string, JsonElement>();
 
         var moduleFound = MergeSettingsObject(payload, modulePath, "module");
-        var pathFound = MergeSettingsObject(payload, path, "working directory");
+        var pathFound = path is not null && MergeSettingsObject(payload, path, "explicit");
 
         if (!moduleFound && !pathFound)
         {
@@ -325,7 +333,7 @@ public sealed record Settings : ISettingsProvider
             // falls back to its own restrictive default -- a meaningful behavior change (e.g.
             // Verbose/Info logging is unreachable for the rest of the run without one), so this is
             // Warning rather than Info.
-            Logger.Warning($"no settings file found at module path '{modulePath}' or working directory '{path}'; falling back to restrictive defaults (debug=false, logLevel=error).", DiagnosticsCategories.Settings);
+            Logger.Warning($"no settings file found at module path '{modulePath}'{DescribeExplicit(path)}; falling back to restrictive defaults (debug=false, logLevel=error).", DiagnosticsCategories.Settings);
         }
 
         if (File.Exists(localPath))
@@ -344,7 +352,7 @@ public sealed record Settings : ISettingsProvider
             }
             else
             {
-                // Unlike a malformed module/working-directory settings.json (which throws), a
+                // Unlike a malformed module/explicit-path settings.json (which throws), a
                 // malformed settings.local.json -- invalid JSON syntax (doc is null, see
                 // TryParseFile) or valid JSON in the wrong shape -- is silently ignored by design.
                 // Silent was the wrong call by itself (a typo'd override would otherwise vanish with
@@ -362,10 +370,15 @@ public sealed record Settings : ISettingsProvider
         return payload;
     }
 
+    private static string DescribeExplicit(string? path)
+    {
+        return path is null ? string.Empty : $" or explicit path '{path}'";
+    }
+
     /// <summary>
     /// Merges one settings.json-shaped file's "settings" object into <paramref name="payload"/>
     /// (key-by-key, overwriting anything already present under the same key). Shared by both the
-    /// module-dir and working-directory tiers in <see cref="LoadPayload"/> -- unlike
+    /// module-dir and explicit-path tiers in <see cref="LoadPayload"/> -- unlike
     /// settings.local.json (handled separately there), both of these are "strict": a malformed file
     /// throws rather than being silently ignored, since neither is the personal/optional override
     /// settings.local.json is. Returns whether the file existed, so the caller can tell whether
@@ -407,7 +420,7 @@ public sealed record Settings : ISettingsProvider
     /// Parses a file as JSON, returning null (rather than throwing) if it isn't valid JSON syntax --
     /// used only for the lenient settings.local.json tier, where a malformed file is meant to be
     /// logged and ignored, not thrown. <see cref="ParseFileStrict"/> is the counterpart for the
-    /// module-dir/working-directory tiers, which are meant to throw instead.
+    /// module-dir/explicit-path tiers, which are meant to throw instead.
     /// </summary>
     private static JsonDocument? TryParseFile(string path)
     {
@@ -425,7 +438,7 @@ public sealed record Settings : ISettingsProvider
     /// Parses a file as JSON, converting invalid JSON syntax into a <see cref="SettingsError"/>
     /// (consistent with the shape-mismatch <see cref="SettingsError"/>s already thrown right after
     /// each call site) instead of letting the raw <see cref="JsonException"/> propagate unhandled.
-    /// Used only for the strict module-dir/working-directory tiers -- <see cref="TryParseFile"/> is
+    /// Used only for the strict module-dir/explicit-path tiers -- <see cref="TryParseFile"/> is
     /// the counterpart for the lenient settings.local.json tier.
     /// </summary>
     private static JsonDocument ParseFileStrict(string path)

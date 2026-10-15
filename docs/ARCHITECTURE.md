@@ -458,8 +458,8 @@ only actually fires if someone deliberately overrides to a different RID.
 `src/Base/UserSettings.cs` ([issue #58](https://github.com/croicu/desk-tools/issues/58)): the per-user
 settings file, `%LOCALAPPDATA%\Desk Tools\settings.json` (`Environment.SpecialFolder.LocalApplicationData`,
 so also `~/.local/share` on Linux; `DefaultPath` is null, not a relative fallback, on a platform with no such
-folder). `Settings.Section()` merges it key-by-key between the working-directory `settings.json` and
-`settings.local.json`; `UserSettings.Set(section, key, value)` is the write side (read-modify-write that keeps
+folder). `Settings.Section()` merges it key-by-key between the module `settings.json` and
+`settings.local.json` (both next to the module -- nothing is read from the working directory, issue #70); `UserSettings.Set(section, key, value)` is the write side (read-modify-write that keeps
 every other section/key, temp file then move, refuses the core section and never overwrites a file that is not
 valid JSON). The trust rule that shapes all of it: the file is writable by any process running as the user but
 read by the elevated Service, so it is honored only for non-core sections -- never `logDir`/`port`/`debug`/

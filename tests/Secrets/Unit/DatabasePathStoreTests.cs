@@ -3,8 +3,8 @@ using Croicu.Desk.Tools.Base;
 namespace Croicu.Desk.Tools.Secrets.Tests.Unit;
 
 /// <summary>
-/// Every test passes explicit paths for all four settings tiers (never the real %LOCALAPPDATA% or the
-/// working directory), so these run in parallel and never touch the developer's own files.
+/// Every test passes explicit paths for every settings tier (never the real %LOCALAPPDATA% or the
+/// module directory), so these run in parallel and never touch the developer's own files.
 /// </summary>
 [TestClass]
 public sealed class DatabasePathStoreTests

@@ -133,20 +133,25 @@ Three methods today:
 ### settings.json discovery order
 
 `Settings.Load()`/`Settings.Section()` (`src/Base/Settings.cs`) read these tiers, each overriding
-the previous key-by-key (`Settings.Load()`, the core `"settings"` object, reads tiers 1, 2 and 4; the
-per-user tier 3 is read by `Settings.Section()` only -- see below):
+the previous key-by-key (`Settings.Load()`, the core `"settings"` object, reads tiers 1 and 3; the
+per-user tier 2 is read by `Settings.Section()` only -- see below):
 
 1. `settings.json` next to the running module (`AppContext.BaseDirectory` -- e.g. the install
    directory of a deployed build). The base tier.
-2. `settings.json` in the current working directory. A per-deployment/per-invocation override of
-   the module tier.
-3. The per-user file, `%LOCALAPPDATA%\Desk Tools\settings.json` (the platform's local
+2. The per-user file, `%LOCALAPPDATA%\Desk Tools\settings.json` (the platform's local
    application-data folder elsewhere; [issue #58](https://github.com/croicu/desk-tools/issues/58)).
    Written by the program itself -- `UserSettings.Set(section, key, value)` -- for values only the
    user's own machine can know, e.g. the KeePass database path the secrets file picker records
    (`secrets` section, `databasePath` key; the picker runs only when it is missing or empty).
-4. `settings.local.json` in the current working directory -- a personal, gitignored override (see
+3. `settings.local.json` next to the running module -- a personal, gitignored override (see
    `.gitignore`) of everything above, including the per-user file.
+
+**Nothing is read relative to the current working directory**
+([issue #70](https://github.com/croicu/desk-tools/issues/70)). Service is elevated, so a cwd-relative
+settings file would let anyone who can write the directory Service happens to run in change its core
+settings (`port`, `logDir`, `allowCallerRegistry`, ...). Every default location is next to the module,
+which only an administrator can write in an installed build. (`Settings.Load`/`Section` take an optional
+explicit `path` for tests and embedding hosts that choose the file themselves; nothing passes one by default.)
 
 **The per-user file is honored only for non-core sections.** Any process running as the user can
 write it, while Service reads it elevated, so it may supply sections that sit beside the `"settings"`
@@ -171,10 +176,9 @@ that references `Hello`/`Service` too) and `settings.json` alone into `$(Publish
 `installer/Setup.wixproj` globs its entire publish output into the MSI and a developer's personal
 override must never ship there.
 
-A malformed module-tier or working-directory `settings.json` throws (`SettingsError`); a malformed
-`settings.local.json` is logged and ignored, since it's the optional/personal tier. If neither the
-module nor working-directory tier has a file, `Load()` falls back to restrictive defaults
-(`debug=false`, `logLevel=error`) and logs a warning.
+A malformed module-tier `settings.json` throws (`SettingsError`); a malformed `settings.local.json` is
+logged and ignored, since it's the optional/personal tier. If the module tier has no file, `Load()` falls
+back to restrictive defaults (`debug=false`, `logLevel=error`) and logs a warning.
 
 ### settings.json -- `"secrets"` section
 

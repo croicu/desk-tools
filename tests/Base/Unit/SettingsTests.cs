@@ -149,7 +149,7 @@ public sealed class SettingsTests
         var messages = Logger.Drain();
         Assert.HasCount(4, messages);
         Assert.Contains("no module settings file", messages[0]);
-        Assert.Contains("no working directory settings file", messages[1]);
+        Assert.Contains("no explicit settings file", messages[1]);
         Assert.Contains("falling back to restrictive defaults", messages[2]);
         Assert.Contains("no local settings override", messages[3]);
     }
@@ -295,7 +295,7 @@ public sealed class SettingsTests
     /// JsonException escaping Load().
     /// </summary>
     [TestMethod]
-    public void Load_WorkingDirectoryFileNotValidJson_ThrowsSettingsError()
+    public void Load_ExplicitPathFileNotValidJson_ThrowsSettingsError()
     {
         var path = WriteTempSettingsFile("not valid json");
         try
@@ -323,7 +323,7 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// Unlike the strict module/working-directory tiers above, an invalid-JSON-syntax
+    /// Unlike the strict module/explicit-path tiers above, an invalid-JSON-syntax
     /// settings.local.json is logged and ignored, not thrown -- same lenient treatment as a
     /// valid-JSON-wrong-shape local file (see Load_MalformedLocalSettingsFile_LogsWarningAndIgnoresIt).
     /// </summary>
@@ -346,7 +346,7 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
-    public void Section_WorkingDirectoryFileNotValidJson_ThrowsSettingsError()
+    public void Section_ExplicitPathFileNotValidJson_ThrowsSettingsError()
     {
         var path = WriteTempSettingsFile("not valid json");
         try
@@ -395,7 +395,7 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
-    public void Load_ModulePathUsedWhenWorkingDirectoryFileMissing()
+    public void Load_ModulePathUsedWhenExplicitPathFileMissing()
     {
         var modulePath = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose", "idleTimeout": 7 } }""");
         try
@@ -412,7 +412,7 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
-    public void Load_WorkingDirectoryOverridesModulePathKeyByKey()
+    public void Load_ExplicitPathOverridesModulePathKeyByKey()
     {
         var modulePath = WriteTempSettingsFile("""{ "settings": { "debug": false, "logLevel": "error", "idleTimeout": 7 } }""");
         var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "verbose" } }""");
