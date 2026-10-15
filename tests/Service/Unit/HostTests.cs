@@ -263,6 +263,78 @@ public sealed class HostTests
         Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
     }
 
+    [TestMethod]
+    public void AcceptLoop_McpRegistryDirWhileNotAllowed_IsRefusedWithoutLookingAnythingUp()
+    {
+        var reply = SendMcp(new TestSettings { IdleTimeout = 1 }, """{"name": "no-such-tool", "processId": 1234, "registryDir": "C:\\somewhere"}""");
+
+        Assert.AreEqual(-32602, reply.GetProperty("error").GetProperty("code").GetInt32());
+        StringAssert.Contains(reply.GetProperty("error").GetProperty("message").GetString(), "allowCallerRegistry");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpRegistryDirNotAString_ReturnsInvalidParams()
+    {
+        var reply = SendMcp(new TestSettings { IdleTimeout = 1, AllowCallerRegistry = true }, """{"name": "x", "processId": 1234, "registryDir": 5}""");
+
+        Assert.AreEqual(-32602, reply.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpRegistryDirRelative_ReturnsInvalidParams()
+    {
+        var reply = SendMcp(new TestSettings { IdleTimeout = 1, AllowCallerRegistry = true }, """{"name": "x", "processId": 1234, "registryDir": "relative/dir"}""");
+
+        Assert.AreEqual(-32602, reply.GetProperty("error").GetProperty("code").GetInt32());
+        StringAssert.Contains(reply.GetProperty("error").GetProperty("message").GetString(), "fully qualified");
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpRegistryDirUnc_ReturnsInvalidParams()
+    {
+        var reply = SendMcp(new TestSettings { IdleTimeout = 1, AllowCallerRegistry = true }, """{"name": "x", "processId": 1234, "registryDir": "\\\\server\\share\\reg"}""");
+
+        Assert.AreEqual(-32602, reply.GetProperty("error").GetProperty("code").GetInt32());
+    }
+
+    [TestMethod]
+    public void AcceptLoop_McpRegistryDirAllowed_GetsPastTheGateAndLooksTheToolUp()
+    {
+        var registryDir = JsonSerializer.Serialize(EmptyRegistryDir());
+
+        var reply = SendMcp(new TestSettings { IdleTimeout = 1, AllowCallerRegistry = true }, $$"""{"name": "no-such-tool", "processId": 1234, "registryDir": {{registryDir}}}""");
+
+        // Past validation, so it reached McpToolLauncher, which found the tool in neither registry.
+        Assert.AreEqual(-32603, reply.GetProperty("error").GetProperty("code").GetInt32());
+        StringAssert.Contains(reply.GetProperty("error").GetProperty("message").GetString(), "no-such-tool");
+    }
+
+    private static JsonElement SendMcp(TestSettings settings, string paramsJson)
+    {
+        var host = new Host(settings, port: 0, mcpRegistryBaseDirectory: EmptyRegistryDir());
+        host.Start();
+
+        JsonElement reply;
+        using (var client = new TcpClient())
+        {
+            client.Connect(IPAddress.Loopback, host.Port);
+
+            using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
+            using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
+
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.McpMethod}}", "params": {{paramsJson}} }""");
+            var line = reader.ReadLine();
+            Assert.IsNotNull(line);
+
+            using var doc = JsonDocument.Parse(line);
+            reply = doc.RootElement.Clone();
+        }
+
+        var shutdownTask = Task.Run(host.WaitForIdleShutdown);
+        Assert.IsTrue(shutdownTask.Wait(BoundedWait), "Host did not shut down within the bounded wait after the connection closed.");
+        return reply;
+    }
+
     /// <summary>
     /// A throwaway, guaranteed-empty directory (never the real, build-generated
     /// mcp-registry/hello.json) -- so these tests never accidentally pick up a real registered tool

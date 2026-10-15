@@ -26,9 +26,11 @@ public enum DeskCommand
 /// <see cref="AppError"/>-to-exit-code-1 handling every other app in this repo already uses (see
 /// <see cref="Context.Start"/>). <see cref="McpToolName"/> is only ever set alongside
 /// <see cref="DeskCommand.Mcp"/> -- <see cref="Program.ParseArgs"/> requires it as that
-/// subcommand's own positional argument.
+/// subcommand's own positional argument. <see cref="RegistryDir"/> (<c>mcp</c> only, <c>--registry
+/// &lt;dir&gt;</c>) is a caller-chosen MCP tool registry for Service to search first -- Service honors it
+/// only when its own <c>settings.allowCallerRegistry</c> is on (issue #69).
 /// </summary>
-public sealed record CliArguments(DeskCommand Command, string? McpToolName = null, string? LogDir = null);
+public sealed record CliArguments(DeskCommand Command, string? McpToolName = null, string? LogDir = null, string? RegistryDir = null);
 
 public static class Program
 {
@@ -83,7 +85,9 @@ public static class Program
                 Logger.Print("Shutdown requested.");
                 break;
             case DeskCommand.Mcp:
-                var (stdin, stdout) = LaunchMcpToolWithAutoStart(client, arguments.McpToolName!);
+                // Service needs a fully qualified path (it has a different working directory).
+                var registryDir = arguments.RegistryDir is null ? null : Path.GetFullPath(arguments.RegistryDir);
+                var (stdin, stdout) = LaunchMcpToolWithAutoStart(client, arguments.McpToolName!, registryDir);
 
                 // Non-zero when the tool went away before the client did -- see McpProxy.Run.
                 return McpProxy.Run(stdin, stdout);
@@ -136,17 +140,17 @@ public static class Program
     /// tool name) the same way <see cref="PingWithAutoStart"/> would for an equivalent case -- a
     /// known, minor imprecision inherited from that existing pattern rather than a new one.
     /// </summary>
-    private static (long Stdin, long Stdout) LaunchMcpToolWithAutoStart(Client client, string name)
+    private static (long Stdin, long Stdout) LaunchMcpToolWithAutoStart(Client client, string name, string? registryDir)
     {
         try
         {
-            return client.LaunchMcpTool(name);
+            return client.LaunchMcpTool(name, registryDir);
         }
         catch (AppError)
         {
             Logger.Info("desk: service not reachable; attempting to start it.");
             ServiceLauncher.StartAndWaitUntilReachable(() => TryPing(client));
-            return client.LaunchMcpTool(name);
+            return client.LaunchMcpTool(name, registryDir);
         }
     }
 
@@ -160,6 +164,7 @@ public static class Program
         DeskCommand? command = null;
         string? mcpToolName = null;
         string? logDir = null;
+        string? registryDir = null;
         for (var i = 0; i < argv.Length; i++)
         {
             var arg = argv[i];
@@ -197,6 +202,16 @@ public static class Program
 
                 logDir = argv[++i];
             }
+            else if (arg == "--registry")
+            {
+                if (i + 1 >= argv.Length)
+                {
+                    Logger.Error("desk: error: --registry requires a directory argument");
+                    Environment.Exit(2);
+                }
+
+                registryDir = argv[++i];
+            }
             else
             {
                 Logger.Error($"desk: error: unrecognized argument: {arg}");
@@ -206,10 +221,16 @@ public static class Program
 
         if (command is null)
         {
-            Logger.Error("desk: error: usage: desk <ping|shutdown|mcp <name>> [--log <dir>]");
+            Logger.Error("desk: error: usage: desk <ping|shutdown|mcp <name>> [--log <dir>] [--registry <dir>]");
             Environment.Exit(2);
         }
 
-        return new CliArguments(Command: command!.Value, McpToolName: mcpToolName, LogDir: logDir);
+        if (registryDir is not null && command != DeskCommand.Mcp)
+        {
+            Logger.Error("desk: error: --registry only applies to 'mcp'");
+            Environment.Exit(2);
+        }
+
+        return new CliArguments(Command: command!.Value, McpToolName: mcpToolName, LogDir: logDir, RegistryDir: registryDir);
     }
 }

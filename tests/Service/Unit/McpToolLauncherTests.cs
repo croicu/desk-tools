@@ -89,10 +89,58 @@ public sealed class McpToolLauncherTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(output), "expected 'dotnet --version' to write a version string to stdout.");
     }
 
-    private string WriteRegistryEntry(string json)
+    [TestMethod]
+    public void Launch_CallerRegistryHasTheTool_LaunchesFromThere()
+    {
+        var shippedDir = Path.Combine(_baseDir, "shipped");
+        var callerDir = Path.Combine(_baseDir, "caller");
+        var name = WriteRegistryEntry("""{"command": "dotnet", "args": ["--version"], "env": {}}""", callerDir);
+
+        using var tool = McpToolLauncher.Launch(name, shippedDir, callerDir);
+
+        var output = tool.StandardOutput.ReadLine();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(output));
+    }
+
+    [TestMethod]
+    public void Launch_CallerRegistryPreferredOverShippedOneOfTheSameName()
+    {
+        var shippedDir = Path.Combine(_baseDir, "shipped");
+        var callerDir = Path.Combine(_baseDir, "caller");
+        var name = WriteRegistryEntry("""{"command": "no-such-program-in-shipped", "args": [], "env": {}}""", shippedDir);
+        WriteRegistryEntry("""{"command": "dotnet", "args": ["--version"], "env": {}}""", callerDir);
+
+        using var tool = McpToolLauncher.Launch(name, shippedDir, callerDir);
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(tool.StandardOutput.ReadLine()));
+    }
+
+    [TestMethod]
+    public void Launch_CallerRegistryLacksTheTool_FallsBackToTheShippedOne()
+    {
+        var shippedDir = Path.Combine(_baseDir, "shipped");
+        var callerDir = Path.Combine(_baseDir, "caller");
+        Directory.CreateDirectory(callerDir);
+        var name = WriteRegistryEntry("""{"command": "dotnet", "args": ["--version"], "env": {}}""", shippedDir);
+
+        using var tool = McpToolLauncher.Launch(name, shippedDir, callerDir);
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(tool.StandardOutput.ReadLine()));
+    }
+
+    [TestMethod]
+    public void Launch_ToolInNeitherRegistry_ThrowsAppError()
+    {
+        var shippedDir = Path.Combine(_baseDir, "shipped");
+        var callerDir = Path.Combine(_baseDir, "caller");
+
+        Assert.ThrowsExactly<AppError>(() => McpToolLauncher.Launch("no-such-tool", shippedDir, callerDir));
+    }
+
+    private string WriteRegistryEntry(string json, string? baseDir = null)
     {
         const string name = "test-tool";
-        var registryDir = Path.Combine(_baseDir, "mcp-registry");
+        var registryDir = Path.Combine(baseDir ?? _baseDir, "mcp-registry");
         Directory.CreateDirectory(registryDir);
         File.WriteAllText(Path.Combine(registryDir, $"{name}.json"), json);
         return name;

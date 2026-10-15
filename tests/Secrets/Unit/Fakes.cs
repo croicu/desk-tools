@@ -94,8 +94,6 @@ internal sealed class FakePasswordPrompt : IPasswordPrompt
             Asks.Add((databasePath, attempt, maxAttempts));
         }
 
-        Asked.Set();
-
         string? queued;
         var hasQueued = false;
         lock (_answers)
@@ -105,6 +103,7 @@ internal sealed class FakePasswordPrompt : IPasswordPrompt
 
         if (hasQueued)
         {
+            Asked.Set();
             return Task.FromResult(Record(queued));
         }
 
@@ -115,6 +114,9 @@ internal sealed class FakePasswordPrompt : IPasswordPrompt
         }
 
         cancellation.Register(CloseOnCancel, open);
+
+        // Only now: a test that waits on Asked then calls Answer/Fail must find the dialog already open.
+        Asked.Set();
         return open.Task;
     }
 

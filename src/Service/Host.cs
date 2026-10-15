@@ -41,8 +41,10 @@ internal sealed class Host
     internal const string ShutdownMethod = "shutdown";
 
     /// <summary>
-    /// Params <c>{"name": "&lt;registry name&gt;", "processId": &lt;caller's own PID&gt;}</c>. Launches
-    /// the named <c>mcp-registry/</c> tool (see <see cref="McpToolLauncher"/>) and duplicates its
+    /// Params <c>{"name": "&lt;registry name&gt;", "processId": &lt;caller's own PID&gt;}</c>, plus an
+    /// optional <c>"registryDir"</c> (a caller-chosen registry searched first, honored only when
+    /// <see cref="ISettingsProvider.AllowCallerRegistry"/> is on -- otherwise the request fails; issue
+    /// #69). Launches the named <c>mcp-registry/</c> tool (see <see cref="McpToolLauncher"/>) and duplicates its
     /// stdin/stdout pipe handles directly into the caller's own process (see
     /// <see cref="HandleDuplicator"/>, issue #32) -- Service steps out of the exchange entirely once
     /// this returns, rather than relaying bytes for the tool's whole lifetime. Result
@@ -337,10 +339,29 @@ internal sealed class Host
 
         var name = nameElement.GetString() ?? string.Empty;
 
+        string? callerRegistryDirectory = null;
+        if (paramsElement.TryGetProperty("registryDir", out var registryDirElement))
+        {
+            if (registryDirElement.ValueKind != JsonValueKind.String)
+            {
+                WriteError(writer, id, InvalidParamsCode, "Invalid params: 'registryDir' must be a string.");
+                return;
+            }
+
+            callerRegistryDirectory = registryDirElement.GetString();
+            var refusal = CheckCallerRegistry(callerRegistryDirectory);
+            if (refusal is not null)
+            {
+                Logger.Warning($"host: refusing mcp request for '{name}': {refusal}", Category);
+                WriteError(writer, id, InvalidParamsCode, $"Invalid params: {refusal}");
+                return;
+            }
+        }
+
         ToolProcess? tool = null;
         try
         {
-            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory);
+            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory, callerRegistryDirectory);
             var (stdin, stdout) = HandleDuplicator.Duplicate(tool, processId);
             TrackChild(name, tool.OpenWatchHandle());
             tool.DisownAfterHandoff();
@@ -357,6 +378,32 @@ internal sealed class Host
             // leaking it.
             tool?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Returns why a caller-supplied <c>registryDir</c> must not be used, or null if it may be. Service
+    /// is elevated and reachable by any local process, so honoring one at all is opt-in
+    /// (<see cref="ISettingsProvider.AllowCallerRegistry"/>, default off), and it must be a fully
+    /// qualified local path -- a UNC path would make Service authenticate to an arbitrary machine.
+    /// </summary>
+    private string? CheckCallerRegistry(string? registryDir)
+    {
+        if (!_settings.AllowCallerRegistry)
+        {
+            return "'registryDir' is not allowed: set settings.allowCallerRegistry to true in settings.json to let callers supply a registry.";
+        }
+
+        if (string.IsNullOrWhiteSpace(registryDir) || !Path.IsPathFullyQualified(registryDir))
+        {
+            return "'registryDir' must be a fully qualified path.";
+        }
+
+        if (registryDir.StartsWith(@"\\", StringComparison.Ordinal) || registryDir.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "'registryDir' must be a local path, not a network (UNC) path.";
+        }
+
+        return null;
     }
 
     private static void WriteResult(StreamWriter writer, JsonElement id, object result)

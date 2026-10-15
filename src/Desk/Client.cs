@@ -73,9 +73,9 @@ internal sealed class Client
     /// <see cref="McpProxy.Run"/> to open. Same fail-fast <see cref="AppError"/> conventions as
     /// <see cref="Send"/>.
     /// </summary>
-    public (long Stdin, long Stdout) LaunchMcpTool(string name)
+    public (long Stdin, long Stdout) LaunchMcpTool(string name, string? registryDir = null)
     {
-        var replyLine = SendRequest("mcp", new McpParams(name, Environment.ProcessId));
+        var replyLine = SendRequest("mcp", new McpParams(name, Environment.ProcessId, registryDir));
         var result = ParseResultElement(replyLine);
 
         var stdin = long.Parse(result.GetProperty("stdin").GetString()!);
@@ -156,5 +156,5 @@ internal sealed class Client
 
     private sealed record RequestEnvelope(string Jsonrpc, int Id, string Method, object? Params = null);
 
-    private sealed record McpParams(string Name, int ProcessId);
+    private sealed record McpParams(string Name, int ProcessId, string? RegistryDir);
 }

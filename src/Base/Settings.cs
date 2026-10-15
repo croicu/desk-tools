@@ -36,6 +36,7 @@ public sealed record Settings : ISettingsProvider
     public int IdleTimeout { get; }
     public string? LogDir { get; }
     public int Port { get; }
+    public bool AllowCallerRegistry { get; }
 
     private Settings(
         bool debug,
@@ -44,7 +45,8 @@ public sealed record Settings : ISettingsProvider
         List<string> excludedCategories,
         int idleTimeout,
         string? logDir,
-        int port)
+        int port,
+        bool allowCallerRegistry)
     {
         Debug = debug;
         LogLevel = logging;
@@ -53,6 +55,7 @@ public sealed record Settings : ISettingsProvider
         IdleTimeout = idleTimeout;
         LogDir = logDir;
         Port = port;
+        AllowCallerRegistry = allowCallerRegistry;
     }
 
     public static Settings Current => CurrentInstance.Value ?? throw new InvalidOperationException("Settings.Load() must be called first.");
@@ -67,6 +70,7 @@ public sealed record Settings : ISettingsProvider
         var idleTimeout = 600;
         string? logDir = null;
         var port = DefaultPort;
+        var allowCallerRegistry = false;
 
         var payload = LoadPayload(modulePath ?? DefaultModulePath, path ?? DefaultSettingsPath, localPath ?? DefaultLocalPath);
 
@@ -167,6 +171,16 @@ public sealed record Settings : ISettingsProvider
 
                 port = portEl.GetInt32();
             }
+
+            if (payload.TryGetValue("allowCallerRegistry", out var allowCallerRegistryEl))
+            {
+                if (allowCallerRegistryEl.ValueKind != JsonValueKind.True && allowCallerRegistryEl.ValueKind != JsonValueKind.False)
+                {
+                    throw new SettingsError("'settings.allowCallerRegistry' in settings.json must be true or false.");
+                }
+
+                allowCallerRegistry = allowCallerRegistryEl.GetBoolean();
+            }
         }
 
         if (logCategories.Count == 0)
@@ -178,7 +192,7 @@ public sealed record Settings : ISettingsProvider
             logCategories = expandCategories ? new List<string>() : new List<string> { DiagnosticsCategories.General };
         }
 
-        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir, port);
+        var settings = new Settings(debug, logLevel, logCategories, excludedCategories, idleTimeout, logDir, port, allowCallerRegistry);
         CurrentInstance.Value = settings;
 
         return settings;

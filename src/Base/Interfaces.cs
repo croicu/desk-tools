@@ -69,6 +69,14 @@ public interface ISettingsProvider
     /// <c>ProjectReference</c> on <c>Service.csproj</c> just to see one port number.
     /// </summary>
     int Port { get; }
+
+    /// <summary>
+    /// Whether Service honors an <c>mcp</c> request's <c>registryDir</c> (a caller-chosen MCP tool
+    /// registry searched before the shipped one, issue #69). Default false: Service is elevated and
+    /// any process can reach it, so a caller-chosen registry would let that process run arbitrary
+    /// programs (and request secrets for them) at Service's privilege. Meant for development and tests.
+    /// </summary>
+    bool AllowCallerRegistry { get; }
 }
 
 /// <summary>
