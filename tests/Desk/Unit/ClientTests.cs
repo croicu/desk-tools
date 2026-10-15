@@ -60,6 +60,45 @@ public sealed class ClientTests
         }
     }
 
+    /// <summary>
+    /// Service crashing (or being shut down) while a request is in flight resets the connection. That must come
+    /// out as an <see cref="AppError"/> -- a message and exit code 1 -- not an unhandled <see cref="IOException"/>
+    /// that kills Desk with a crash report ([issue #78](https://github.com/croicu/desk-tools/issues/78)).
+    /// </summary>
+    [TestMethod]
+    public void Send_ConnectionResetWhileWaitingForTheReply_ThrowsAppErrorNotIOException()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        void ResetAfterReadingTheRequest()
+        {
+            using var peer = listener.AcceptTcpClient();
+            using var reader = new StreamReader(peer.GetStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            reader.ReadLine();
+
+            // Abortive close (RST), like a process that died: the client's pending read fails with an IOException.
+            peer.Client.LingerState = new LingerOption(enable: true, seconds: 0);
+            peer.Client.Close();
+        }
+
+        var server = Task.Run(ResetAfterReadingTheRequest);
+        try
+        {
+            var client = new Client(new TestSettings(), port: port);
+
+            var error = Assert.ThrowsExactly<AppError>(() => client.Send("ping"));
+
+            StringAssert.Contains(error.Message, "lost the connection");
+            Assert.IsTrue(server.Wait(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [TestMethod]
     public void Send_NothingListening_ThrowsAppError()
     {

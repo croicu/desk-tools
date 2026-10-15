@@ -18,6 +18,15 @@
       ],
       "env": {}
     },
+    "pager": {
+      "type": "stdio",
+      "command": "desk",
+      "args": [
+        "mcp",
+        "pager"
+      ],
+      "env": {}
+    },
     "link-program-files": {
       "type": "stdio",
       "command": "desk",

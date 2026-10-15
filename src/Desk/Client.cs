@@ -101,11 +101,23 @@ internal sealed class Client
         using var writer = new StreamWriter(stream, WriteEncoding) { NewLine = "\n", AutoFlush = true };
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
-        var request = new RequestEnvelope(Jsonrpc: "2.0", Id: RequestId, Method: method, Params: paramsObject);
-        writer.WriteLine(JsonSerializer.Serialize(request, SerializerOptions));
-        Logger.Info($"desk: sent request: method={method}", Category);
+        // A connection that breaks while a request is in flight (Service crashed or was shut down, say) is a
+        // failure to report, not a crash: an IOException here would otherwise end Desk with a crash report
+        // instead of a message and exit code 1 (issue #78).
+        string? replyLine;
+        try
+        {
+            var request = new RequestEnvelope(Jsonrpc: "2.0", Id: RequestId, Method: method, Params: paramsObject);
+            writer.WriteLine(JsonSerializer.Serialize(request, SerializerOptions));
+            Logger.Info($"desk: sent request: method={method}", Category);
 
-        var replyLine = reader.ReadLine();
+            replyLine = reader.ReadLine();
+        }
+        catch (IOException error)
+        {
+            throw new AppError($"lost the connection to the service: {error.Message}", Category);
+        }
+
         if (replyLine is null)
         {
             throw new AppError("connection closed before a reply was received.", Category);
