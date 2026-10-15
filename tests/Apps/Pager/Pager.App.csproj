@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Base\Base.csproj" />
+    <ProjectReference Include="..\..\..\src\Launcher\Launcher.csproj" />
   </ItemGroup>
 
 </Project>

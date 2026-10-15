@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Namespace Croicu.Desk.Tools.Service.Launcher (not .Launcher): everything here is about Service, so the
+         types need not repeat it - Client, Starter, ToolConnection (issue #74). -->
+    <RootNamespace>Croicu.Desk.Tools.Service.Launcher</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Base only: Desk and the test apps reference this assembly, never the other way round. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Base\Base.csproj" />
+  </ItemGroup>
+
+</Project>

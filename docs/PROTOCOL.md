@@ -139,10 +139,10 @@ Three methods today:
 
 - `desk ping` -- sends a `ping` request, prints the result (`pong`), and exits. If `Host` isn't
   reachable, auto-starts it via the installed scheduled task (`schtasks /run /tn "Desk Tools
-  Service"`, see `docs/ARCHITECTURE.md`'s `ServiceLauncher` entry and
+  Service"`, see `docs/ARCHITECTURE.md`'s `Starter` entry and
   [issue #27](https://github.com/croicu/desk-tools/issues/27)) -- deliberately *not* a plain child
   process, since `Host` is meant to run at the scheduled task's own elevated integrity level, not
-  Desk's own (typically lower) one -- then retries once. Only works once Service has actually been
+  Desk's own (typically lower) one -- and waits until it answers. Only works once Service has actually been
   installed via the MSI (the scheduled task must already be registered); fails with a clear error
   otherwise, or if it never becomes reachable within the startup wait (60 seconds: a cold first
   start of a freshly built Service has been seen taking about 30).

@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Croicu.Desk.Tools.Base;
 
-namespace Croicu.Desk.Tools.Desk;
+namespace Croicu.Desk.Tools.Service.Launcher;
 
 /// <summary>
 /// Client for <c>src/Service</c>'s <c>Host</c>: connects to its loopback TCP listener, sends one
@@ -15,10 +15,15 @@ namespace Croicu.Desk.Tools.Desk;
 /// <paramref name="port"/> override (same pattern as <c>Host</c>'s own constructor) so a test can
 /// point this at an ephemeral port a test-local <c>Host</c> is actually listening on, instead of the
 /// real <see cref="ISettingsProvider.Port"/>.
+///
+/// Fails fast: every method throws an <see cref="AppError"/> -- a <see cref="NotRunningError"/> when nothing is
+/// listening -- and never retries or starts Service on its own (that is <see cref="Starter"/>'s job).
+/// Lives in the Launcher assembly ([issue #74](https://github.com/croicu/desk-tools/issues/74)) so anything that
+/// needs a running Service -- <c>src/Desk</c>, the test apps -- shares it without needing <c>Desk.exe</c>.
 /// </summary>
-internal sealed class Client
+public sealed class Client
 {
-    private const string Category = "desk";
+    private const string Category = "launcher";
 
     // A fixed id: exactly one request per connection, no concurrent in-flight requests on the same
     // Client to distinguish, so there's nothing a varying id would buy here -- same reasoning
@@ -49,7 +54,56 @@ internal sealed class Client
         _portOverride = port;
     }
 
-    internal int Port => _portOverride ?? _settings.Port;
+    public int Port => _portOverride ?? _settings.Port;
+
+    /// <summary>Pings Service and returns its answer (<c>"pong"</c>). Throws <see cref="NotRunningError"/> if it is not running.</summary>
+    public string Ping()
+    {
+        return Send("ping");
+    }
+
+    /// <summary>
+    /// Asks Service to shut down. Throws <see cref="NotRunningError"/> if it is not running -- the caller decides
+    /// whether that is a failure (for <c>desk shutdown</c> it is not: there is nothing to shut down).
+    /// </summary>
+    public void Shutdown()
+    {
+        Send("shutdown");
+    }
+
+    /// <summary>True if Service answers a ping. Never throws for an unreachable or failing Service.</summary>
+    public bool IsReachable()
+    {
+        try
+        {
+            Ping();
+            return true;
+        }
+        catch (AppError)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Asks Service to launch the registered MCP tool <paramref name="name"/> and hands its stdin/stdout to this
+    /// process: sends an <c>mcp</c> request with this process's own PID as the target of Service's
+    /// <c>DuplicateHandle</c>-based handoff (see docs/PROTOCOL.md's <c>mcp</c> method,
+    /// [issue #32](https://github.com/croicu/desk-tools/issues/32)) and opens the two handles the result returns as a
+    /// <see cref="ToolConnection"/>, which the caller owns and must dispose. <paramref name="registryDir"/> is the
+    /// optional caller-chosen registry (honored by Service only when <c>settings.allowCallerRegistry</c> is on, issue
+    /// #69); it must be fully qualified. May block while Service resolves the tool's declared secrets (the master
+    /// password dialog never times out, issue #66).
+    /// </summary>
+    public ToolConnection LaunchTool(string name, string? registryDir = null)
+    {
+        var replyLine = SendRequest("mcp", new McpParams(name, Environment.ProcessId, registryDir));
+        var result = ParseResultElement(replyLine);
+
+        var stdin = long.Parse(result.GetProperty("stdin").GetString()!);
+        var stdout = long.Parse(result.GetProperty("stdout").GetString()!);
+        return ToolConnection.FromHandles(stdin, stdout);
+    }
 
     /// <summary>
     /// Connects, sends <paramref name="method"/> as a JSON-RPC request with no params, and returns
@@ -58,34 +112,16 @@ internal sealed class Client
     /// isn't valid JSON-RPC, or when it's a JSON-RPC error response (the error's own message is
     /// folded into the <see cref="AppError"/>).
     /// </summary>
-    public string Send(string method)
+    internal string Send(string method)
     {
         var replyLine = SendRequest(method, paramsObject: null);
         var result = ParseResultElement(replyLine);
         return result.GetString() ?? string.Empty;
     }
 
-    /// <summary>
-    /// Sends an <c>mcp</c> request for the registry tool named <paramref name="name"/>, with this
-    /// process's own PID as the target for Service's <c>DuplicateHandle</c>-based handoff (see
-    /// docs/PROTOCOL.md's <c>mcp</c> method, [issue #32](https://github.com/croicu/desk-tools/issues/32))
-    /// -- returns the two duplicated handle values from the result, ready for
-    /// <see cref="McpProxy.Run"/> to open. Same fail-fast <see cref="AppError"/> conventions as
-    /// <see cref="Send"/>.
-    /// </summary>
-    public (long Stdin, long Stdout) LaunchMcpTool(string name, string? registryDir = null)
-    {
-        var replyLine = SendRequest("mcp", new McpParams(name, Environment.ProcessId, registryDir));
-        var result = ParseResultElement(replyLine);
-
-        var stdin = long.Parse(result.GetProperty("stdin").GetString()!);
-        var stdout = long.Parse(result.GetProperty("stdout").GetString()!);
-        return (stdin, stdout);
-    }
-
     private string SendRequest(string method, object? paramsObject)
     {
-        Logger.Info($"desk: connecting to 127.0.0.1:{Port}.", Category);
+        Logger.Info($"launcher: connecting to 127.0.0.1:{Port}.", Category);
 
         using var client = new TcpClient();
         try
@@ -100,7 +136,7 @@ internal sealed class Client
             // a genuine failure.
             if (error.SocketErrorCode == SocketError.ConnectionRefused)
             {
-                throw new ServiceNotRunningError(message, Category);
+                throw new NotRunningError(message, Category);
             }
 
             throw new AppError(message, Category);
@@ -111,14 +147,14 @@ internal sealed class Client
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         // A connection that breaks while a request is in flight (Service crashed or was shut down, say) is a
-        // failure to report, not a crash: an IOException here would otherwise end Desk with a crash report
-        // instead of a message and exit code 1 (issue #78).
+        // failure to report, not a crash: an IOException here would otherwise end the caller with a crash report
+        // instead of a message (issue #78).
         string? replyLine;
         try
         {
             var request = new RequestEnvelope(Jsonrpc: "2.0", Id: RequestId, Method: method, Params: paramsObject);
             writer.WriteLine(JsonSerializer.Serialize(request, SerializerOptions));
-            Logger.Info($"desk: sent request: method={method}", Category);
+            Logger.Info($"launcher: sent request: method={method}", Category);
 
             replyLine = reader.ReadLine();
         }
@@ -132,7 +168,7 @@ internal sealed class Client
             throw new AppError("connection closed before a reply was received.", Category);
         }
 
-        Logger.Info($"desk: received reply: {replyLine}", Category);
+        Logger.Info($"launcher: received reply: {replyLine}", Category);
         return replyLine;
     }
 
