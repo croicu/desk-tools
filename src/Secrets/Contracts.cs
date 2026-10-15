@@ -31,3 +31,35 @@ internal interface IPasswordPrompt
     /// </summary>
     byte[]? Ask(string databasePath, int attempt, int maxAttempts);
 }
+
+/// <summary>
+/// Shows the user a file-open dialog -- the platform-specific half of choosing the KeePass database
+/// (a Windows common dialog today, see <c>Platform/</c>); <see cref="DatabaseLocation"/> adds the
+/// "only when unset" policy and the validation. An interface so that policy is unit-testable without
+/// a window.
+/// </summary>
+internal interface IFilePicker
+{
+    /// <summary>
+    /// Asks for one existing file whose name ends in <paramref name="extension"/> (no leading dot,
+    /// e.g. <c>"kdbx"</c>), described as <paramref name="filterName"/> in the type filter. Returns its
+    /// full path, or null if the user cancelled.
+    /// </summary>
+    string? Pick(string title, string filterName, string extension);
+}
+
+/// <summary>
+/// Where the chosen database path is remembered -- <see cref="DatabasePathStore"/> in production (the
+/// settings files), a fake in tests.
+/// </summary>
+internal interface IDatabasePathStore
+{
+    /// <summary>Says where the value lives, for error messages that tell a developer where to look.</summary>
+    string Description { get; }
+
+    /// <summary>The saved path, or null if it is missing (or not a string).</summary>
+    string? Get();
+
+    /// <summary>Saves the path where <see cref="Get"/> will find it, keeping every unrelated setting.</summary>
+    void Set(string path);
+}

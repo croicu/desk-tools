@@ -167,6 +167,17 @@ A malformed module-tier or working-directory `settings.json` throws (`SettingsEr
 module nor working-directory tier has a file, `Load()` falls back to restrictive defaults
 (`debug=false`, `logLevel=error`) and logs a warning.
 
+### settings.json -- `"secrets"` section
+
+Read with `Settings.Section("secrets")`; written to the per-user file by the secrets file picker
+([issue #61](https://github.com/croicu/desk-tools/issues/61)).
+
+- `databasePath` (string, absolute path, default unset) -- the KeePassXC database (`.kdbx`, KDBX 4) the
+  secrets code opens. Must be an existing **local** file: a UNC path or a network-drive path is refused (the
+  elevated Service would otherwise authenticate to whatever server it names). Missing or empty means "ask":
+  the file picker opens once and its answer is saved here. A value that is present but unusable (the file
+  moved, a non-`.kdbx` path, a network path) is an error that names this setting, not a prompt.
+
 ### settings.json / settings.local.json -- `"settings"` object
 
 - `idleTimeout` (number, seconds, default `600`) -- how long the resident process (`Host`, see
