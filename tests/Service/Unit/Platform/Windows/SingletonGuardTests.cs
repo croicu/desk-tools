@@ -84,7 +84,13 @@ public sealed class SingletonGuardTests
         Assert.IsTrue(acquiredOnBackgroundThread.Wait(TimeSpan.FromSeconds(5)), "Background thread did not acquire the mutex within the bounded wait.");
         thread.Join();
 
-        using var guard = SingletonGuard.TryAcquire(out var abandoned, mutexName);
+        // Thread.Join() returns when the *managed* thread has finished; the OS marks the mutex
+        // abandoned (and releases it) when the native thread actually exits, a moment later. A
+        // zero-timeout attempt right here therefore races that and failed intermittently (issue #47:
+        // measured 69 of 400 first attempts failing, every retry succeeding within ~3ms). Waiting
+        // up to a few seconds removes the race without weakening what is asserted. The production
+        // default stays zero-timeout: it is about a *running* instance, which isn't going away.
+        using var guard = SingletonGuard.TryAcquire(out var abandoned, mutexName, timeout: TimeSpan.FromSeconds(5));
 
         Assert.IsNotNull(guard);
         Assert.IsTrue(abandoned);
