@@ -14,6 +14,7 @@ public enum DeskCommand
 {
     Ping,
     Shutdown,
+    ForgetPassword,
     Mcp,
 }
 
@@ -77,6 +78,12 @@ public static class Program
                 break;
             case DeskCommand.Shutdown:
                 return Shutdown(client);
+            case DeskCommand.ForgetPassword:
+                // Only Service can: the remembered password is in a file nothing unelevated may touch.
+                Starter.EnsureRunning(client);
+                client.ForgetPassword();
+                Logger.Print("The master password was forgotten; you will be asked for it again.");
+                break;
             case DeskCommand.Mcp:
                 // Service needs a fully qualified path (it has a different working directory).
                 var registryDir = arguments.RegistryDir is null ? null : Path.GetFullPath(arguments.RegistryDir);
@@ -128,11 +135,11 @@ public static class Program
         for (var i = 0; i < argv.Length; i++)
         {
             var arg = argv[i];
-            if (arg == "ping" || arg == "shutdown" || arg == "mcp")
+            if (arg == "ping" || arg == "shutdown" || arg == "forget-password" || arg == "mcp")
             {
                 if (command is not null)
                 {
-                    Logger.Error("desk: error: 'ping', 'shutdown', and 'mcp' are mutually exclusive");
+                    Logger.Error("desk: error: 'ping', 'shutdown', 'forget-password', and 'mcp' are mutually exclusive");
                     Environment.Exit(2);
                 }
 
@@ -149,7 +156,12 @@ public static class Program
                 }
                 else
                 {
-                    command = arg == "ping" ? DeskCommand.Ping : DeskCommand.Shutdown;
+                    command = arg switch
+                    {
+                        "ping" => DeskCommand.Ping,
+                        "forget-password" => DeskCommand.ForgetPassword,
+                        _ => DeskCommand.Shutdown,
+                    };
                 }
             }
             else if (arg == "--log")
@@ -181,7 +193,7 @@ public static class Program
 
         if (command is null)
         {
-            Logger.Error("desk: error: usage: desk <ping|shutdown|mcp <name>> [--log <dir>] [--registry <dir>]");
+            Logger.Error("desk: error: usage: desk <ping|shutdown|forget-password|mcp <name>> [--log <dir>] [--registry <dir>]");
             Environment.Exit(2);
         }
 

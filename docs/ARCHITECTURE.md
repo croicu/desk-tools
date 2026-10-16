@@ -257,7 +257,7 @@ a running Service -- `src/Desk`, the test apps -- shares it instead of shelling 
 only; Desk and the apps reference it (graph: Desk, apps -> Launcher -> Base). The namespace says "Service", so the
 types do not repeat it. Several small public building blocks, everything else `internal`:
 
-- `Client`: the JSON-RPC calls (`Ping`, `Shutdown`, `IsReachable`, `LaunchTool(name, registryDir?)`), constructed with
+- `Client`: the JSON-RPC calls (`Ping`, `Shutdown`, `ForgetPassword`, `IsReachable`, `LaunchTool(name, registryDir?)`), constructed with
   an optional port override (same pattern as `Host`'s own constructor) so a test can point it at a test-local peer.
   Fails fast and never retries or starts Service itself. A refused connection (nothing listening) is a
   `NotRunningError`; a closed connection, a JSON-RPC error, or a connection that breaks mid-request
@@ -563,6 +563,29 @@ finding the database so two launches never open two file pickers. Its parameterl
   cancelled or failed dialog holds nothing and returns null (the launch goes on without the secret, per the
   invariants above); only reused for the same database. Delivering the secrets *asynchronously* instead
   (so a launch never waits) is a deferred idea: [issue #67](https://github.com/croicu/desk-tools/issues/67).
+- **Remembering the password across Service runs** ([issue #84](https://github.com/croicu/desk-tools/issues/84)):
+  `PromptedPassword` takes an optional `IPasswordStore`. A password `Vault` reports as `Accepted()` (KeePassXC opened the
+  database with it -- never merely a typed one) is saved once; with nothing held, the first attempt loads it instead of
+  opening the dialog. `Rejected()` (changed in KeePassXC) deletes it and falls through to the prompt; `Forget()` (the
+  `forget-password` method, `ISecretBroker.Forget`) drops it everywhere; `Dispose` deliberately does *not*, since Service
+  exiting is exactly what it is for. **Until explicitly forgotten** -- there is no expiry, the owner's choice
+  (convenience over the extra safety of a lifetime). A store that fails (unreadable, damaged, directory not trusted) is a
+  warning and a normal prompt, never a failed launch. `secrets.rememberPassword` (default `true`, `RememberSetting`)
+  turns it off entirely. Only a Windows implementation exists; the Linux/Neutral variants are placeholders (#51).
+- `Platform/Windows/ProtectedPasswordStore.cs` (`IPasswordStore`): the invariant that no secret value reaches medium
+  integrity decides everything here. The password is encrypted with **DPAPI at machine scope** (`CryptProtectData` by
+  P/Invoke, `CRYPTPROTECT_LOCAL_MACHINE`, fixed entropy; user scope would let any process of the same user undo it) and
+  written to `%ProgramData%\Desk Tools\password.bin` in a directory created by the elevated Service with a **protected
+  DACL granting only Administrators and SYSTEM**, so an unelevated process of the user can neither read nor replace it.
+  **The directory is not trusted merely because it exists** (users can create folders in `%ProgramData%`, and an owner can
+  rewrite a DACL): before every read, write or delete the owner must be Administrators/SYSTEM, no non-trusted principal
+  may be allowed in, and it must not be a reparse point -- otherwise the store throws `AppError` (a warning and a prompt),
+  so an *unelevated* Service (a dev run) simply cannot remember a password. The blob holds the database path with the
+  password (compared case-insensitively, so a password is only offered for its own database) behind a magic header; a
+  blob DPAPI cannot open is discarded. Written to a temp file then moved, so a reader never sees a half-written file.
+  Verified against a real elevated Service: the directory appears "accessible to Administrators and SYSTEM only", an
+  unelevated shell gets "Access is denied" listing it, reading its ACL, or reading `password.bin`, and a restarted Service
+  resolves the secret with no dialog.
 - `Platform/{Windows,Linux,Neutral}/PasswordPrompt.cs` (`IPasswordPrompt.AskAsync`): Windows shows a modal,
   topmost dialog through P/Invoke `DialogBoxIndirectParam` over an in-memory template
   (`Platform/Windows/DialogTemplate.cs`, unit-tested by walking the byte layout) -- no WinForms/WPF. It

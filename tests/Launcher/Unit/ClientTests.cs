@@ -167,6 +167,26 @@ public sealed class ClientTests
     }
 
     [TestMethod]
+    public void ForgetPassword_SendsTheForgetPasswordMethod()
+    {
+        string? captured = null;
+
+        string ForgetAndSayDone(Client client)
+        {
+            client.ForgetPassword();
+            return "done";
+        }
+
+        void Capture(string? line) => captured = line;
+
+        var reply = ExchangeWithPeer("forget-password", replyLine: """{"jsonrpc": "2.0", "id": 1, "result": "ok"}""", ForgetAndSayDone, Capture);
+
+        Assert.AreEqual("done", reply);
+        Assert.IsNotNull(captured);
+        StringAssert.Contains(captured, "\"method\":\"forget-password\"");
+    }
+
+    [TestMethod]
     public void IsReachable_NothingListening_IsFalseAndNeverThrows()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -209,7 +229,7 @@ public sealed class ClientTests
         }
     }
 
-    private static string ExchangeWithPeer(string method, string replyLine, Func<Client, string>? call = null)
+    private static string ExchangeWithPeer(string method, string replyLine, Func<Client, string>? call = null, Action<string?>? capture = null)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -224,7 +244,7 @@ public sealed class ClientTests
             // No BOM: mirrors what the real Host writes -- see Host.WriteEncoding's own remarks.
             using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { NewLine = "\n", AutoFlush = true };
 
-            reader.ReadLine();
+            capture?.Invoke(reader.ReadLine());
             writer.WriteLine(replyLine);
         });
 

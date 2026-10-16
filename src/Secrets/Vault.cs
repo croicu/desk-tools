@@ -84,6 +84,8 @@ internal sealed class Vault
             switch (read.Status)
             {
                 case ReadStatus.Ok:
+                    // KeePassXC opened the database with it: now (and only now) it is known to be the right one.
+                    _passwords.Accepted();
                     return read.Notes;
 
                 case ReadStatus.AuthenticationFailed:

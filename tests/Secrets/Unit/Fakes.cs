@@ -38,6 +38,10 @@ internal sealed class FakePasswordSource : IPasswordSource
 
     public int RejectedCount { get; private set; }
 
+    public int AcceptedCount { get; private set; }
+
+    public int ForgetCount { get; private set; }
+
     public byte[]? Get(string databasePath, int attempt)
     {
         Attempts.Add(attempt);
@@ -54,6 +58,85 @@ internal sealed class FakePasswordSource : IPasswordSource
     public void Rejected()
     {
         RejectedCount++;
+    }
+
+    public void Accepted()
+    {
+        AcceptedCount++;
+    }
+
+    public void Forget()
+    {
+        ForgetCount++;
+    }
+}
+
+/// <summary>
+/// An in-memory <see cref="IPasswordStore"/> that counts calls and can be told to fail. Keeps its own copy of what
+/// it was given and hands out fresh copies, like the real one.
+/// </summary>
+internal sealed class FakePasswordStore : IPasswordStore
+{
+    public byte[]? Remembered { get; private set; }
+
+    public string? RememberedFor { get; private set; }
+
+    public int Loads { get; private set; }
+
+    public int Saves { get; private set; }
+
+    public int Forgets { get; private set; }
+
+    public Exception? LoadFails { get; set; }
+
+    public Exception? SaveFails { get; set; }
+
+    public Exception? ForgetFails { get; set; }
+
+    public void Seed(string databasePath, string password)
+    {
+        RememberedFor = databasePath;
+        Remembered = Encoding.UTF8.GetBytes(password);
+    }
+
+    public byte[]? Load(string databasePath)
+    {
+        Loads++;
+        if (LoadFails is not null)
+        {
+            throw LoadFails;
+        }
+
+        if (Remembered is null || !string.Equals(RememberedFor, databasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return (byte[])Remembered.Clone();
+    }
+
+    public void Save(string databasePath, byte[] password)
+    {
+        Saves++;
+        if (SaveFails is not null)
+        {
+            throw SaveFails;
+        }
+
+        RememberedFor = databasePath;
+        Remembered = (byte[])password.Clone();
+    }
+
+    public void Forget()
+    {
+        Forgets++;
+        if (ForgetFails is not null)
+        {
+            throw ForgetFails;
+        }
+
+        Remembered = null;
+        RememberedFor = null;
     }
 }
 
