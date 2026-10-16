@@ -76,9 +76,9 @@ public sealed class Client
     /// disk (issue #84) -- so the next secret request asks the user again. Only Service can do this: the remembered
     /// password sits in a file nothing unelevated may touch.
     /// </summary>
-    public void ForgetPassword()
+    public void ClearSecrets()
     {
-        Send("forget-password");
+        Send("clear-secrets");
     }
 
     /// <summary>True if Service answers a ping. Never throws for an unreachable or failing Service.</summary>

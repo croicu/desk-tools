@@ -46,7 +46,7 @@ internal sealed class Host
     /// on disk (issue #84), so the next secret request asks again. Goes through Service because only the elevated Service
     /// can touch the admin-only file. An error if this Service has no secret broker (non-Windows).
     /// </summary>
-    internal const string ForgetPasswordMethod = "forget-password";
+    internal const string ClearSecretsMethod = "clear-secrets";
 
     /// <summary>
     /// Params <c>{"name": "&lt;registry name&gt;", "processId": &lt;caller's own PID&gt;}</c>, plus an
@@ -347,8 +347,8 @@ internal sealed class Host
                         }
 
                         return true;
-                    case ForgetPasswordMethod:
-                        HandleForgetPassword(idElement, writer);
+                    case ClearSecretsMethod:
+                        HandleClearSecrets(idElement, writer);
                         return false;
                     case McpMethod:
                         HandleMcp(idElement, paramsElement, writer);
@@ -466,7 +466,7 @@ internal sealed class Host
         return null;
     }
 
-    private void HandleForgetPassword(JsonElement id, StreamWriter writer)
+    private void HandleClearSecrets(JsonElement id, StreamWriter writer)
     {
         if (_secrets is null)
         {

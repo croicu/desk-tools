@@ -8,11 +8,11 @@ using Croicu.Desk.Tools.Secrets;
 namespace Croicu.Desk.Tools.Service.Tests.Unit;
 
 /// <summary>
-/// The <c>forget-password</c> method ([issue #84](https://github.com/croicu/desk-tools/issues/84)): only Service can
-/// delete the remembered master password (the file nothing unelevated may touch), so <c>desk forget-password</c> asks it to.
+/// The <c>clear-secrets</c> method ([issue #84](https://github.com/croicu/desk-tools/issues/84)): only Service can
+/// delete the remembered master password (the file nothing unelevated may touch), so <c>desk clear-secrets</c> asks it to.
 /// </summary>
 [TestClass]
-public sealed class HostForgetPasswordTests
+public sealed class HostClearSecretsTests
 {
     private static readonly TimeSpan BoundedWait = TimeSpan.FromSeconds(10);
     private static readonly UTF8Encoding WriteEncoding = new(encoderShouldEmitUTF8Identifier: false);
@@ -40,7 +40,7 @@ public sealed class HostForgetPasswordTests
             using var writer = new StreamWriter(client.GetStream(), WriteEncoding) { NewLine = "\n", AutoFlush = true };
             using var reader = new StreamReader(client.GetStream(), Encoding.UTF8);
 
-            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.ForgetPasswordMethod}}"}""");
+            writer.WriteLine($$"""{"jsonrpc": "2.0", "id": 1, "method": "{{Host.ClearSecretsMethod}}"}""");
             var line = reader.ReadLine();
             Assert.IsNotNull(line);
             using var doc = JsonDocument.Parse(line);
@@ -52,7 +52,7 @@ public sealed class HostForgetPasswordTests
     }
 
     [TestMethod]
-    public void ForgetPassword_AsksTheSecretBrokerToForget_AndAnswersOk()
+    public void ClearSecrets_AsksTheSecretBrokerToForget_AndAnswersOk()
     {
         var broker = new CountingBroker();
         var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0, secrets: broker);
@@ -64,7 +64,7 @@ public sealed class HostForgetPasswordTests
     }
 
     [TestMethod]
-    public void ForgetPassword_WithoutASecretBroker_IsAnErrorNotACrash()
+    public void ClearSecrets_WithoutASecretBroker_IsAnErrorNotACrash()
     {
         var host = new Host(new TestSettings { IdleTimeout = 1 }, port: 0);
 
