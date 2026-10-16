@@ -20,6 +20,26 @@ public static class RepoPaths
 {
     public static string ResolveOutDir()
     {
+        var (configuration, ridSegment) = ResolveConfigurationAndRid();
+        var outDir = Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
+        return ridSegment is null ? outDir : Path.Combine(outDir, ridSegment);
+    }
+
+    /// <summary>
+    /// The build output folder of a test fixture tool under <c>tests/MCP/&lt;fixture&gt;/</c> (issue #86: the hello
+    /// tool), <c>tests/MCP/&lt;fixture&gt;/bin/&lt;Configuration&gt;/net10.0/[&lt;RID&gt;]/</c> -- mirroring the calling test
+    /// assembly's own configuration and RID exactly as <see cref="ResolveOutDir"/> does, since
+    /// <c>tests/Directory.Build.props</c> gives every project there the same defaults.
+    /// </summary>
+    public static string ResolveFixtureOutDir(string fixture)
+    {
+        var (configuration, ridSegment) = ResolveConfigurationAndRid();
+        var dir = Path.Combine(FindRepoRoot(), "tests", "MCP", fixture, "bin", configuration, "net10.0");
+        return ridSegment is null ? dir : Path.Combine(dir, ridSegment);
+    }
+
+    private static (string Configuration, string? RidSegment) ResolveConfigurationAndRid()
+    {
         var testDir = new DirectoryInfo(AppContext.BaseDirectory);
         string? ridSegment = null;
         if (!string.Equals(testDir.Name, "net10.0", StringComparison.OrdinalIgnoreCase))
@@ -28,9 +48,7 @@ public static class RepoPaths
             testDir = testDir.Parent!;
         }
 
-        var configuration = FindConfigurationFolder(testDir);
-        var outDir = Path.Combine(FindRepoRoot(), "out", configuration, "net10.0");
-        return ridSegment is null ? outDir : Path.Combine(outDir, ridSegment);
+        return (FindConfigurationFolder(testDir), ridSegment);
     }
 
     /// <summary>

@@ -8,7 +8,7 @@
        duplicating them, since scripts/ isn't a descendant of src/ or tests/, so MSBuild's own
        Directory.Build.props auto-import wouldn't find either of those files walking up from here,
        needing an explicit Import instead. Resolving to the identical shared out/<Configuration>/
-       net10.0/[<RID>/] folder Service.csproj/Hello.csproj/Desk.csproj already build into is the
+       net10.0/[<RID>/] folder Service.csproj/Pager.csproj/Desk.csproj already build into is the
        whole point: a Python tool's own mcp-registry/<name>.json still lands right there, next to
        everything else's, so McpToolLauncher's existing "the registry lives in Service's own
        directory" lookup (see issue #29) continues to work unchanged. The scripts themselves land
@@ -18,12 +18,11 @@
        say so, no new path-resolution logic needed in McpToolLauncher either way. -->
   <Import Project="$(MSBuildThisFileDirectory)..\src\Directory.Build.props" />
 
-  <!-- Each item is one Python MCP tool: "goodbye" implies both the script file (scripts/goodbye.py)
+  <!-- Each item is one Python MCP tool: "link-program-files" implies both the script file (scripts/link-program-files.py)
        and the registry entry's own name, mirroring <McpToolName>'s per-project opt-in for .NET
        tools (see src/Directory.Build.targets), just item-based instead of property-based, since
        this one NoTargets project covers every Python tool rather than one project per tool. -->
   <ItemGroup>
-    <McpPythonTool Include="goodbye" />
     <McpPythonTool Include="link-program-files" />
     <McpPythonTool Include="unlink-program-files" />
   </ItemGroup>

@@ -49,7 +49,7 @@ public static class Program
     /// For <see cref="DeskCommand.Mcp"/>, installs a silent <see cref="DiagnosticsLog"/> sink
     /// *before* <see cref="Context.Start"/> can install a real, printing one -- once
     /// <see cref="McpProxy.Run"/> starts relaying the launched tool's own stdout, this process's
-    /// stdout must carry only that traffic, the same reasoning <c>src/Hello/Program.cs</c>'s own
+    /// stdout must carry only that traffic, the same reasoning <c>tests/MCP/Hello/Program.cs</c>'s own
     /// <c>Start</c> already documents for itself (no <c>ProjectReference</c> to cross-link a real
     /// <c>&lt;see cref&gt;</c> to it).
     /// </summary>

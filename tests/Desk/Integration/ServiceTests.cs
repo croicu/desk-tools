@@ -26,7 +26,7 @@ namespace Croicu.Desk.Tools.Desk.Tests.Integration;
 /// here starts its own real Service instance on the same, un-overridden default port (there's no
 /// port-override CLI flag on Service to give each test its own) -- confirmed as a genuine race, not
 /// a theoretical one, by running the two tests in this class together repeatedly: with
-/// <see cref="Mcp_LaunchesRealHelloEntry_ProxiesARealInitializeExchange"/> added alongside
+/// <see cref="Mcp_LaunchesARealPythonEntry_ProxiesARealInitializeExchange"/> added alongside
 /// <see cref="Ping_ThenShutdown_AgainstAManuallyStartedService"/>, MSTestSettings.cs's default
 /// method-level parallelization made both tests' Service instances race for the same port, and
 /// whichever one lost (or got torn down mid-flight by the other test's own shutdown/kill) produced
@@ -79,7 +79,7 @@ public sealed class ServiceTests
     /// [issue #33](https://github.com/croicu/desk-tools/issues/33)) as a real, separate child
     /// process -- unlike <see cref="Ping_ThenShutdown_AgainstAManuallyStartedService"/>'s in-process
     /// <see cref="Program.Start"/> calls, this genuinely needs its own real stdin/stdout: once
-    /// <c>desk mcp hello</c> starts proxying, its stdout carries only the launched tool's own MCP
+    /// <c>desk mcp link-program-files</c> starts proxying, its stdout carries only the launched tool's own MCP
     /// traffic, which this test both drives (writes a real <c>initialize</c> request to the child's
     /// stdin) and reads back (a real response), exactly as an external MCP client would. Windows-only
     /// (the underlying <c>DuplicateHandle</c> handoff is) -- guarded at runtime with
@@ -89,7 +89,7 @@ public sealed class ServiceTests
     /// the guard only actually fires if someone deliberately overrides to a different RID.
     /// </summary>
     [TestMethod]
-    public void Mcp_LaunchesRealHelloEntry_ProxiesARealInitializeExchange()
+    public void Mcp_LaunchesARealPythonEntry_ProxiesARealInitializeExchange()
     {
         var outDir = RepoPaths.ResolveOutDir();
         if (!string.Equals(new DirectoryInfo(outDir).Name, "win-x64", StringComparison.OrdinalIgnoreCase))
@@ -100,10 +100,10 @@ public sealed class ServiceTests
 
         var serviceDllPath = Path.Combine(outDir, "Service.dll");
         var deskDllPath = Path.Combine(outDir, "Desk.dll");
-        var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
+        var registryPath = Path.Combine(outDir, "mcp-registry", "link-program-files.json");
         Assert.IsTrue(File.Exists(serviceDllPath), $"'{serviceDllPath}' not found.");
         Assert.IsTrue(File.Exists(deskDllPath), $"'{deskDllPath}' not found.");
-        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello too.");
+        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build scripts/Scripts.csproj too (a plain `dotnet build`).");
 
         var serviceStartInfo = new ProcessStartInfo("dotnet") { WorkingDirectory = outDir, UseShellExecute = false };
         serviceStartInfo.ArgumentList.Add(serviceDllPath);
@@ -127,10 +127,10 @@ public sealed class ServiceTests
             };
             mcpStartInfo.ArgumentList.Add(deskDllPath);
             mcpStartInfo.ArgumentList.Add("mcp");
-            mcpStartInfo.ArgumentList.Add("hello");
+            mcpStartInfo.ArgumentList.Add("link-program-files");
 
             using var desk = Process.Start(mcpStartInfo);
-            Assert.IsNotNull(desk, "Failed to start 'desk mcp hello'.");
+            Assert.IsNotNull(desk, "Failed to start 'desk mcp link-program-files'.");
 
             try
             {
@@ -139,16 +139,16 @@ public sealed class ServiceTests
                 desk.StandardInput.Flush();
 
                 var response = desk.StandardOutput.ReadLine();
-                Assert.IsFalse(string.IsNullOrWhiteSpace(response), "expected a proxied response line from 'desk mcp hello'.");
+                Assert.IsFalse(string.IsNullOrWhiteSpace(response), "expected a proxied response line from 'desk mcp link-program-files'.");
 
                 using var doc = JsonDocument.Parse(response!);
                 var root = doc.RootElement;
                 Assert.AreEqual(1, root.GetProperty("id").GetInt32());
                 Assert.AreEqual("2025-06-18", root.GetProperty("result").GetProperty("protocolVersion").GetString());
-                Assert.AreEqual("hello", root.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString());
+                Assert.AreEqual("link-program-files", root.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString());
 
                 desk.StandardInput.Close();
-                Assert.IsTrue(desk.WaitForExit((int)ExitWait.TotalMilliseconds), "'desk mcp hello' did not exit within the bounded wait after stdin closed.");
+                Assert.IsTrue(desk.WaitForExit((int)ExitWait.TotalMilliseconds), "'desk mcp link-program-files' did not exit within the bounded wait after stdin closed.");
                 Assert.AreEqual(0, desk.ExitCode);
             }
             finally

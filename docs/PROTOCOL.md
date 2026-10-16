@@ -6,7 +6,7 @@ CLI signature and file format schemas for `desk-tools`.
 
 <!-- Command name, arguments, flags, exit codes. -->
 
-`src/Service` (`desk-tools`), `src/Hello` (`hello`), `src/Pager` (`pager`), and `src/Desk` (`desk`) all accept:
+`src/Service` (`desk-tools`), `src/Pager` (`pager`), and `src/Desk` (`desk`) all accept:
 
 - `--log <dir>` -- write a timestamped log file into `<dir>` (creating it if missing), in addition
   to whatever console/debug sinks are already active; overrides `settings.json`'s `logDir` if both
@@ -14,7 +14,7 @@ CLI signature and file format schemas for `desk-tools`.
   the CLAUDE.md Logging section for the file's line format.
 
 `src/Service` additionally accepts `--debug` (override `settings.json`'s `debug` flag) and `-h`/
-`--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Hello` accepts only
+`--help` (print usage and exit 0); an unrecognized argument exits 2. `src/Pager` accepts only
 `--log` today -- it's an MCP client-launched stdio server, not something invoked interactively with
 `--help` in mind, and has no CLI-driven debug override (`settings.json`'s `debug` alone still drives
 it). `src/Desk` additionally requires exactly one bare subcommand, `ping`, `shutdown`, or
@@ -27,10 +27,13 @@ section below for what each subcommand sends.
 [issue #33](https://github.com/croicu/desk-tools/issues/33)): usable as a real `.mcp.json`
 `command` entry pointing at Desk instead of a tool's own executable directly. Once launched, its
 own stdout carries only the launched tool's traffic (Desk installs a silent logging sink before
-this starts, the same discipline `src/Hello`'s own `Program.Start` documents for itself) -- see the
+this starts, the same discipline `tests/MCP/Hello`'s own `Program.Start` documents for itself) -- see the
 Echo protocol section below for the full exchange.
 
-## MCP (`src/Hello`)
+## MCP (`tests/MCP/Hello`)
+
+A **test fixture**, no longer a shipped tool ([issue #86](https://github.com/croicu/desk-tools/issues/86)): the minimal
+reference the pager mirrors, launched by the integration tests through a throwaway registry.
 
 Minimal, hand-rolled (no SDK) MCP server over stdio -- launched by an MCP client via `command`
 (e.g. `dotnet Hello.dll`), speaks newline-delimited JSON-RPC 2.0 on stdin/stdout per the
@@ -59,7 +62,7 @@ this is intentionally minimal, a stepping stone toward the real dispatch work re
 
 A standalone MCP server that sends push notifications through [ntfy](https://ntfy.sh)
 ([issue #76](https://github.com/croicu/desk-tools/issues/76)). Same hand-rolled stdio transport and protocol
-version (`2025-06-18`) as `src/Hello` above: `initialize`, `tools/list`, `tools/call`, the same `-32601` /
+version (`2025-06-18`) as `tests/MCP/Hello` above: `initialize`, `tools/list`, `tools/call`, the same `-32601` /
 `-32700` / unknown-tool `-32602` errors; server name `pager`. Run it straight from `.mcp.json`
 (`"command": "pager"`, with `NTFY_TOPIC` in its `env`) or through Service (`desk mcp pager`), which delivers the
 topic from KeePass.
@@ -98,7 +101,7 @@ from `settings.json`'s `port`, see below), writes exactly one JSON-RPC request l
 exactly one JSON-RPC response line back, then the connection closes. A request with no `id` is a
 notification per the JSON-RPC spec: consumed, no response ever sent, regardless of method. A client
 that sends nothing before closing its own end likewise gets no reply, just a closed connection.
-Same error codes/envelope shapes as `src/Hello`'s own hand-rolled dispatch (see the MCP section
+Same error codes/envelope shapes as `tests/MCP/Hello`'s own hand-rolled dispatch (see the MCP section
 above): malformed JSON is `-32700` (Parse error, `id: null`); a request missing `method` is
 `-32600` (Invalid Request); an unrecognized method is `-32601` (Method not found); missing/malformed
 `params` on a method that needs them is `-32602` (Invalid params); an unexpected exception while
@@ -204,13 +207,13 @@ file); concurrent writers are last-one-wins. `Settings.Section()` merges the nam
 across the tiers.
 
 The checked-in module-tier `settings.json` (and an optional, gitignored `settings.local.json`)
-live at the **repo root**, not inside `src/Service/` or `src/Hello/` -- `src/Service` and
-`src/Hello` build into one shared output folder (`src/Directory.Build.props`' `BaseOutputPath`), so
+live at the **repo root**, not inside `src/Service/` or `src/Pager/` -- `src/Service` and
+`src/Pager` build into one shared output folder (`src/Directory.Build.props`' `BaseOutputPath`), so
 a single root-level pair avoids either app's own file silently clobbering the other's at that
 shared path. `src/Directory.Build.targets` copies both into each app's own `$(OutDir)` after
 `Build` (imperative `Copy` tasks, not a declarative `CopyToOutputDirectory` item -- the latter
 propagates through any `ProjectReference`, which would leak these files into every test project
-that references `Hello`/`Service` too) and `settings.json` alone into `$(PublishDir)` after
+that references `Pager`/`Service` too) and `settings.json` alone into `$(PublishDir)` after
 `Publish` -- `settings.local.json` is deliberately never published, since
 `installer/Setup.wixproj` globs its entire publish output into the MSI and a developer's personal
 override must never ship there.
@@ -278,25 +281,25 @@ Build-time-generated, not hand-written or checked in (see [issue #29](https://gi
 and `docs/ARCHITECTURE.md`'s `Directory.Build.targets` entry) -- one small file per MCP tool,
 written to `$(OutDir)mcp-registry/` after a plain `dotnet build` (the same shared output folder
 settings.json itself lands in) or `$(PublishDir)mcp-registry/` after `dotnet publish` (including the
-MSI's own publish step, `installer/Setup.wixproj`, which now publishes `Hello.csproj` alongside
+MSI's own publish step, `installer/Setup.wixproj`, which now publishes `Pager.csproj` alongside
 `Service.csproj`/`Desk.csproj` specifically so this ends up shipped there too). A .NET project opts
 in via its own `<McpToolName>` MSBuild property; a Python tool opts in via an `<McpPythonTool>` item
 in `scripts/Scripts.csproj` instead (see that project's own remarks and `docs/ARCHITECTURE.md`'s
 entry for it) -- either way, each file is a full `.mcp.json`-shaped server fragment
-(`type`/`command`/`args`/`env`, matching that file's own `"hello"` entry exactly) plus a `name`
+(`type`/`command`/`args`/`env`, matching that file's own `"pager"` entry exactly) plus a `name`
 field `.mcp.json` itself doesn't need (there, the tool's name is the surrounding object's own key;
 this registry is one file per tool, so there's no such key to borrow one from):
 
 ```json
-{"name": "hello", "type": "stdio", "command": "dotnet", "args": ["Hello.dll"], "env": {}}
+{"name": "pager", "type": "stdio", "command": "dotnet", "args": ["Pager.dll"], "env": {}, "secrets": [{"env": "NTFY_TOPIC", "entry": "ntfy", "key": "desk-pager"}]}
 ```
 
 ```json
-{"name": "goodbye", "type": "stdio", "command": "python", "args": ["scripts/goodbye.py"], "env": {}}
+{"name": "link-program-files", "type": "stdio", "command": "python", "args": ["scripts/link-program-files.py"], "env": {}}
 ```
 
 - `name` (string) -- the tool's registry name, from the opted-in project's own `<McpToolName>`
-  (.NET, e.g. `"hello"`) or `<McpPythonTool>` item (Python, e.g. `"goodbye"`).
+  (.NET, e.g. `"pager"`) or `<McpPythonTool>` item (Python, e.g. `"link-program-files"`).
 - `type` (string) -- MCP transport, always `"stdio"` for now (every tool this registry currently
   describes uses it).
 - `command` (string) -- `"dotnet"` for a .NET-generated entry, `"python"` for a Python one (see
@@ -304,8 +307,8 @@ this registry is one file per tool, so there's no such key to borrow one from):
   `.mcp.json`'s own `type` already means transport, a same-named field with a different meaning
   would collide. Whatever a tool's own runtime is, this is the extensibility point for it.
 - `args` (array of strings) -- the tool file's bare name for a .NET entry (`$(TargetFileName)`, e.g.
-  `"Hello.dll"`, sitting right next to the registry); a Python entry's own script instead sits one
-  level down, in that same folder's `scripts/` subfolder (e.g. `"scripts/goodbye.py"`), since
+  `"Pager.dll"`, sitting right next to the registry); a Python entry's own script instead sits one
+  level down, in that same folder's `scripts/` subfolder (e.g. `"scripts/link-program-files.py"`), since
   `scripts/Scripts.csproj` copies `.py` files there rather than flat (keeps the repo's own
   `scripts/` layout mirrored in the build output). Either way, still resolvable relative to the
   registry file's own directory, not a full or repo-relative path -- `McpToolLauncher` needs no
@@ -325,9 +328,10 @@ this registry is one file per tool, so there's no such key to borrow one from):
   waits for the master-password dialog if it has to, and a failure or cancel starts the tool without the variable
   (with a warning).
 
-`src/Hello` (.NET) and `scripts/goodbye.py` (Python, via `scripts/Scripts.csproj`) are the two tools
-registered so far -- both real MSBuild machinery in the end, just two different opt-in mechanisms
-for the two different kinds of project.
+`src/Pager` (.NET) and `scripts/link-program-files.py`/`scripts/unlink-program-files.py` (Python, via
+`scripts/Scripts.csproj`) are the tools registered so far -- real MSBuild machinery in the end, just two different
+opt-in mechanisms for the two different kinds of project. (The hello and goodbye tools that used to be here are test
+fixtures under `tests/MCP` now, [issue #86](https://github.com/croicu/desk-tools/issues/86), with no registry entry.)
 
 `src/Service/McpToolLauncher.cs` (see [issue #30](https://github.com/croicu/desk-tools/issues/30)
 and `docs/ARCHITECTURE.md`'s own entry) is the first consumer: given a registry name, it reads and

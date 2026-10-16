@@ -6,7 +6,7 @@ namespace Croicu.Desk.Tools.Pager;
 
 /// <summary>
 /// Standalone MCP server over stdio that sends push notifications through ntfy -- one tool,
-/// <see cref="PageToolName"/>. Hand-rolled JSON-RPC like <c>src/Hello</c> (verified against the spec at
+/// <see cref="PageToolName"/>. Hand-rolled JSON-RPC like <c>tests/MCP/Hello</c> (verified against the spec at
 /// modelcontextprotocol.io/specification/2025-06-18: basic/lifecycle, basic/transports, server/tools), no
 /// SDK. It stands alone on purpose (docs/ARCHITECTURE.md, invariants 1 and 3): it references only <c>Base</c>,
 /// runs straight from <c>.mcp.json</c> (<c>"command": "pager"</c>) with <c>NTFY_TOPIC</c> set by hand, and

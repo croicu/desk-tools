@@ -13,7 +13,7 @@
        Deliberately imperative Copy tasks, not declarative "None Include CopyToOutputDirectory"
        items: an item like that, even declared here rather than directly in Base.csproj, still
        propagates through ProjectReference to whatever references the owning project, and
-       Hello.Tests/Service.Tests/Desk.Tests all reference their own app's csproj (for
+       Service.Tests/Desk.Tests/Pager.Tests all reference their own app's csproj (for
        InternalsVisibleTo access), so it leaked settings.json/settings.local.json into their own
        test bins too, corrupting test isolation the same way putting the items directly in
        Base.csproj corrupted every test project's isolation (see git history). A Copy task tied
@@ -37,7 +37,7 @@
   </Target>
 
   <!-- Build-time MCP tool registry (see issue #29): a project opts in by setting <McpToolName> in
-       its own PropertyGroup (e.g. src/Hello/Hello.csproj sets <McpToolName>hello</McpToolName>),
+       its own PropertyGroup (e.g. tests/MCP/Hello/Hello.csproj sets <McpToolName>hello</McpToolName>),
        a property, not an item, so it doesn't propagate to a referencing test project's own build
        the way CopyToOutputDirectory items did to settings.json above; MSBuild properties are
        private to the project that sets them. One small JSON file per tool
