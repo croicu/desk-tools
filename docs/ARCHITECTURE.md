@@ -260,7 +260,7 @@ a running Service -- `src/Desk`, the test apps -- shares it instead of shelling 
 only; Desk and the apps reference it (graph: Desk, apps -> Launcher -> Base). The namespace says "Service", so the
 types do not repeat it. Several small public building blocks, everything else `internal`:
 
-- `Client`: the JSON-RPC calls (`Ping`, `Shutdown`, `ForgetPassword`, `IsReachable`, `LaunchTool(name, registryDir?)`), constructed with
+- `Client`: the JSON-RPC calls (`Ping`, `Shutdown`, `ClearSecrets`, `IsReachable`, `LaunchTool(name, registryDir?)`), constructed with
   an optional port override (same pattern as `Host`'s own constructor) so a test can point it at a test-local peer.
   Fails fast and never retries or starts Service itself. A refused connection (nothing listening) is a
   `NotRunningError`; a closed connection, a JSON-RPC error, or a connection that breaks mid-request
@@ -570,8 +570,9 @@ finding the database so two launches never open two file pickers. Its parameterl
 - **Remembering the password across Service runs** ([issue #84](https://github.com/croicu/desk-tools/issues/84)):
   `PromptedPassword` takes an optional `IPasswordStore`. A password `Vault` reports as `Accepted()` (KeePassXC opened the
   database with it -- never merely a typed one) is saved once; with nothing held, the first attempt loads it instead of
-  opening the dialog. `Rejected()` (changed in KeePassXC) deletes it and falls through to the prompt; `Forget()` (the
-  `forget-password` method, `ISecretBroker.Forget`) drops it everywhere; `Dispose` deliberately does *not*, since Service
+  opening the dialog. `Rejected()` (changed in KeePassXC) deletes it and falls through to the prompt; `Forget()` (behind the
+  `clear-secrets` method and `desk clear-secrets`, named for everything Service remembers about secrets, not just the
+  password, since more may be saved later; `ISecretBroker.Forget`) drops it everywhere; `Dispose` deliberately does *not*, since Service
   exiting is exactly what it is for. **Until explicitly forgotten** -- there is no expiry, the owner's choice
   (convenience over the extra safety of a lifetime). A store that fails (unreadable, damaged, directory not trusted) is a
   warning and a normal prompt, never a failed launch. `secrets.rememberPassword` (default `true`, `RememberSetting`)

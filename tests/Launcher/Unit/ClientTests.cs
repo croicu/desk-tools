@@ -167,23 +167,23 @@ public sealed class ClientTests
     }
 
     [TestMethod]
-    public void ForgetPassword_SendsTheForgetPasswordMethod()
+    public void ClearSecrets_SendsTheClearSecretsMethod()
     {
         string? captured = null;
 
-        string ForgetAndSayDone(Client client)
+        string ClearAndSayDone(Client client)
         {
-            client.ForgetPassword();
+            client.ClearSecrets();
             return "done";
         }
 
         void Capture(string? line) => captured = line;
 
-        var reply = ExchangeWithPeer("forget-password", replyLine: """{"jsonrpc": "2.0", "id": 1, "result": "ok"}""", ForgetAndSayDone, Capture);
+        var reply = ExchangeWithPeer("clear-secrets", replyLine: """{"jsonrpc": "2.0", "id": 1, "result": "ok"}""", ClearAndSayDone, Capture);
 
         Assert.AreEqual("done", reply);
         Assert.IsNotNull(captured);
-        StringAssert.Contains(captured, "\"method\":\"forget-password\"");
+        StringAssert.Contains(captured, "\"method\":\"clear-secrets\"");
     }
 
     [TestMethod]

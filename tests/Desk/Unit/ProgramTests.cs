@@ -34,11 +34,11 @@ public sealed class ProgramTests
     }
 
     [TestMethod]
-    public void ParseArgs_ForgetPassword_SetsCommand()
+    public void ParseArgs_ClearSecrets_SetsCommand()
     {
-        var arguments = Program.ParseArgs(["forget-password"]);
+        var arguments = Program.ParseArgs(["clear-secrets"]);
 
-        Assert.AreEqual(DeskCommand.ForgetPassword, arguments.Command);
+        Assert.AreEqual(DeskCommand.ClearSecrets, arguments.Command);
     }
 
     [TestMethod]

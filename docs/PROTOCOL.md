@@ -117,11 +117,13 @@ Three methods today:
   (stop listening, join the accept thread) is identical either way. Exits immediately even if
   launched MCP tools are still running -- those exit on their own once they notice Service is gone
   (`DESK_PARENT_PID` watchdog, see `docs/ARCHITECTURE.md`).
-- `forget-password` -- no params, result `"ok"`
-  ([issue #84](https://github.com/croicu/desk-tools/issues/84)). Forgets the KeePass master password: the one held in
-  memory and the one remembered on disk, so the next secret request asks the user again. Goes through `Host` because only
-  the elevated Service can touch the remembered password (a file nothing unelevated may open). `-32603` if this Service
-  has no secret broker (a non-Windows Service).
+- `clear-secrets` -- no params, result `"ok"`
+  ([issue #84](https://github.com/croicu/desk-tools/issues/84), [#88](https://github.com/croicu/desk-tools/issues/88)).
+  Clears everything Service remembers about secrets, in memory and on disk -- today the KeePass master password, so the
+  next secret request asks the user again; more may be remembered later and this clears that too. It never touches a
+  secret stored in KeePass (Service stores no secret values at all). Goes through `Host` because only the elevated
+  Service can touch what it remembers (a file nothing unelevated may open). `-32603` if this Service has no secret
+  broker (a non-Windows Service).
 - `mcp` -- params `{"name": "<mcp-registry name>", "processId": <caller's own PID>}`. Launches the
   named tool (see the MCP tool registry entry below, and `docs/ARCHITECTURE.md`'s `McpToolLauncher`
   entry) and hands the caller direct access to its stdin/stdout by duplicating the underlying pipe
@@ -154,9 +156,9 @@ Three methods today:
   installed via the MSI (the scheduled task must already be registered); fails with a clear error
   otherwise, or if it never becomes reachable within the startup wait (60 seconds: a cold first
   start of a freshly built Service has been seen taking about 30).
-- `desk forget-password` -- makes sure Service is running, then sends `forget-password` and prints "The master
-  password was forgotten; you will be asked for it again." Needed because the remembered password lives in a file only
-  the elevated Service can delete.
+- `desk clear-secrets` -- makes sure Service is running, then sends `clear-secrets` and prints "The remembered
+  secrets were cleared; you will be asked for the master password again." Needed because what Service remembers lives
+  in a file only the elevated Service can delete.
 - `desk shutdown` -- stays fail-fast, no retry, no auto-start (shutting down something that isn't
   running isn't an error worth auto-starting for). Sends a `shutdown` request and, on success,
   prints a fixed confirmation rather than the raw JSON-RPC result. **If Service is not running** (the
@@ -259,7 +261,7 @@ Read with `Settings.Section("secrets")`; written to the per-user file by the sec
   ([issue #84](https://github.com/croicu/desk-tools/issues/84)). On: a password KeePassXC has accepted is saved
   (encrypted, in a directory only Administrators and SYSTEM can open -- see `docs/ARCHITECTURE.md`'s
   `ProtectedPasswordStore`) and the next run uses it instead of asking, **until it is explicitly forgotten**
-  (`desk forget-password`) or KeePassXC rejects it. `false` turns the whole feature off: nothing is read from or written
+  (`desk clear-secrets`) or KeePassXC rejects it. `false` turns the whole feature off: nothing is read from or written
   to disk. Read when Service starts, so a change needs a Service restart. A bad value keeps the default, with a warning.
 
 ### settings.json / settings.local.json -- `"settings"` object
