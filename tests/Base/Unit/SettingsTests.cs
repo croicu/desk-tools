@@ -126,6 +126,52 @@ public sealed class SettingsTests
     }
 
     [TestMethod]
+    public void Load_NoToolConsole_DefaultsToFalse()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "logLevel": "info" } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.IsFalse(settings.ToolConsole);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_ToolConsoleTrue_IsHonored()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "console": true } }""");
+        try
+        {
+            var settings = Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath());
+
+            Assert.IsTrue(settings.ToolConsole);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Load_ToolConsoleNotBoolean_ThrowsSettingsError()
+    {
+        var path = WriteTempSettingsFile("""{ "settings": { "console": "yes" } }""");
+        try
+        {
+            Assert.ThrowsExactly<SettingsError>(() => Settings.Load(path: path, localPath: NonExistentPath(), modulePath: NonExistentPath()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
     public void Load_IdleTimeoutNotNumber_ThrowsSettingsError()
     {
         var path = WriteTempSettingsFile("""{ "settings": { "idleTimeout": "not-a-number" } }""");

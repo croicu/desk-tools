@@ -411,7 +411,7 @@ internal sealed class Host
         ToolProcess? tool = null;
         try
         {
-            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory, callerRegistryDirectory, _secrets);
+            tool = McpToolLauncher.Launch(name, _mcpRegistryBaseDirectory, callerRegistryDirectory, _secrets, ToolConsole.IsVisible(name, _settings));
             var (stdin, stdout) = HandleDuplicator.Duplicate(tool, processId);
             TrackChild(name, tool.OpenWatchHandle());
             tool.DisownAfterHandoff();

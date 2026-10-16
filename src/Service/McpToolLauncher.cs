@@ -38,9 +38,10 @@ internal static class McpToolLauncher
     /// working directory resolve against that directory), otherwise the shipped registry is used. The
     /// caller (<c>Host</c>) is responsible for having checked that the caller may supply one at all.
     /// <paramref name="secrets"/> resolves the tool's declared secrets into environment variables (issue #50);
-    /// null means none are delivered.
+    /// null means none are delivered. <paramref name="showConsole"/> (default false, see <see cref="ToolConsole"/>)
+    /// gives the tool a visible console window.
     /// </summary>
-    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null, string? callerRegistryDirectory = null, ISecretBroker? secrets = null)
+    internal static ToolProcess Launch(string name, string? registryBaseDirectory = null, string? callerRegistryDirectory = null, ISecretBroker? secrets = null, bool showConsole = false)
     {
         var baseDirectory = registryBaseDirectory ?? AppContext.BaseDirectory;
         var registryPath = Path.Combine(baseDirectory, RegistryDirName, $"{name}.json");
@@ -87,7 +88,7 @@ internal static class McpToolLauncher
             env[secret.Key] = secret.Value;
         }
 
-        return ToolLauncher.Launch(fragment.Command, fragment.Args, env, baseDirectory);
+        return ToolLauncher.Launch(fragment.Command, fragment.Args, env, baseDirectory, showConsole);
     }
 
     /// <summary>
