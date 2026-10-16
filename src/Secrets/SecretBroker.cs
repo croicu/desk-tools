@@ -38,7 +38,7 @@ public sealed class SecretBroker : ISecretBroker
               new DatabaseLocation(new DatabasePathStore(), new FilePicker()),
               () => CliLocation.Resolve(),
               new ProcessRunner(),
-              new PromptedPassword(new PasswordPrompt()))
+              new PromptedPassword(new PasswordPrompt(), RememberSetting.IsEnabled() ? new ProtectedPasswordStore() : null))
     {
     }
 
@@ -79,6 +79,11 @@ public sealed class SecretBroker : ISecretBroker
         }
 
         return values;
+    }
+
+    public void Forget()
+    {
+        _passwords.Forget();
     }
 
     public void Dispose()

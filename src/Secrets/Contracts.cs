@@ -12,8 +12,36 @@ internal interface IPasswordSource
     /// </summary>
     byte[]? Get(string databasePath, int attempt);
 
-    /// <summary>The password last returned by <see cref="Get"/> was rejected; drop it if held.</summary>
+    /// <summary>The password last returned by <see cref="Get"/> was rejected; drop it if held (and forget it if remembered).</summary>
     void Rejected();
+
+    /// <summary>
+    /// The password last returned by <see cref="Get"/> was <i>accepted</i> (KeePassXC opened the database with it):
+    /// the only moment it is known to be right, hence the only moment it may be remembered across runs.
+    /// </summary>
+    void Accepted();
+
+    /// <summary>Drops the held password and forgets any remembered one, so the next <see cref="Get"/> asks again.</summary>
+    void Forget();
+}
+
+/// <summary>
+/// Remembers one verified master password across Service runs (issue #84) -- the platform-specific part (an
+/// admin-only DPAPI-protected file on Windows, see <c>Platform/</c>) behind <see cref="PromptedPassword"/>, which
+/// adds the policy. An interface so that policy is unit-testable without touching the disk. Implementations must be
+/// safe to call and may throw <see cref="Croicu.Desk.Tools.Base.AppError"/>; the caller treats any failure as "nothing
+/// remembered" and carries on with the prompt.
+/// </summary>
+internal interface IPasswordStore
+{
+    /// <summary>The remembered password for <paramref name="databasePath"/> (bytes the caller zeroes), or null if none is remembered for that database.</summary>
+    byte[]? Load(string databasePath);
+
+    /// <summary>Remembers <paramref name="password"/> for <paramref name="databasePath"/>, replacing whatever was remembered.</summary>
+    void Save(string databasePath, byte[] password);
+
+    /// <summary>Deletes whatever is remembered. Not an error if nothing is.</summary>
+    void Forget();
 }
 
 /// <summary>

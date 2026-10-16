@@ -42,6 +42,13 @@ internal sealed class Host
     internal const string ShutdownMethod = "shutdown";
 
     /// <summary>
+    /// No params, result <c>"ok"</c> -- forgets the KeePass master password, the one held in memory and the one remembered
+    /// on disk (issue #84), so the next secret request asks again. Goes through Service because only the elevated Service
+    /// can touch the admin-only file. An error if this Service has no secret broker (non-Windows).
+    /// </summary>
+    internal const string ForgetPasswordMethod = "forget-password";
+
+    /// <summary>
     /// Params <c>{"name": "&lt;registry name&gt;", "processId": &lt;caller's own PID&gt;}</c>, plus an
     /// optional <c>"registryDir"</c> (a caller-chosen registry searched first, honored only when
     /// <see cref="ISettingsProvider.AllowCallerRegistry"/> is on -- otherwise the request fails; issue
@@ -340,6 +347,9 @@ internal sealed class Host
                         }
 
                         return true;
+                    case ForgetPasswordMethod:
+                        HandleForgetPassword(idElement, writer);
+                        return false;
                     case McpMethod:
                         HandleMcp(idElement, paramsElement, writer);
                         return false;
@@ -454,6 +464,18 @@ internal sealed class Host
         }
 
         return null;
+    }
+
+    private void HandleForgetPassword(JsonElement id, StreamWriter writer)
+    {
+        if (_secrets is null)
+        {
+            WriteError(writer, id, InternalErrorCode, "This Service has no secret broker, so there is no master password to forget.");
+            return;
+        }
+
+        _secrets.Forget();
+        WriteResult(writer, id, "ok");
     }
 
     private static void WriteResult(StreamWriter writer, JsonElement id, object result)

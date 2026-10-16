@@ -71,6 +71,16 @@ public sealed class Client
         Send("shutdown");
     }
 
+    /// <summary>
+    /// Asks Service to forget the KeePass master password -- the one it holds in memory and the one it remembers on
+    /// disk (issue #84) -- so the next secret request asks the user again. Only Service can do this: the remembered
+    /// password sits in a file nothing unelevated may touch.
+    /// </summary>
+    public void ForgetPassword()
+    {
+        Send("forget-password");
+    }
+
     /// <summary>True if Service answers a ping. Never throws for an unreachable or failing Service.</summary>
     public bool IsReachable()
     {

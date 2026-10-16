@@ -149,6 +149,14 @@ public sealed class SecretBrokerTests
         {
         }
 
+        public void Accepted()
+        {
+        }
+
+        public void Forget()
+        {
+        }
+
         public void Dispose() => Disposed = true;
     }
 }
