@@ -22,7 +22,7 @@ namespace Croicu.Desk.Tools.Service;
 /// listen on comes from <see cref="ISettingsProvider.Port"/> (shared settings.json, so a separate
 /// client process -- <c>src/Desk</c> -- can learn the same value independently). See
 /// [issue #31](https://github.com/croicu/desk-tools/issues/31) for the switch away from this class's
-/// earlier plain-text echo protocol -- mirrors <c>src/Hello/Program.cs</c>'s own hand-rolled
+/// earlier plain-text echo protocol -- mirrors <c>tests/MCP/Hello/Program.cs</c>'s own hand-rolled
 /// JSON-RPC dispatch style (same error codes, same envelope shapes), just over a TCP connection
 /// instead of stdio, and one request per connection instead of a persistent read loop.
 /// </summary>
@@ -284,7 +284,7 @@ internal sealed class Host
 
     /// <summary>
     /// Parses and dispatches one JSON-RPC request line, mirroring
-    /// <c>src/Hello/Program.cs</c>'s own <c>HandleLine</c> (same error codes/envelope shapes). Returns
+    /// <c>tests/MCP/Hello/Program.cs</c>'s own <c>HandleLine</c> (same error codes/envelope shapes). Returns
     /// whether <see cref="HandleConnection"/> should now signal shutdown -- only
     /// <see cref="ShutdownMethod"/> returns true, and only after its own response has already been
     /// written, so the client always gets a normal result for the shutdown request itself before the
@@ -376,7 +376,7 @@ internal sealed class Host
     /// <see cref="McpToolLauncher.Launch"/> or <see cref="HandleDuplicator.Duplicate"/> (an
     /// <see cref="AppError"/>) surfaces as <see cref="InternalErrorCode"/>, same as any other
     /// unexpected runtime failure -- this repo doesn't currently distinguish "known domain failure"
-    /// from "truly unexpected" in its JSON-RPC error codes (see <c>src/Hello/Program.cs</c>'s own
+    /// from "truly unexpected" in its JSON-RPC error codes (see <c>tests/MCP/Hello/Program.cs</c>'s own
     /// single catch-all), just message content.
     /// </summary>
     private void HandleMcp(JsonElement id, JsonElement paramsElement, StreamWriter writer)

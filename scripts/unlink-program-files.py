@@ -44,7 +44,7 @@ def write_error(id_: Any, code: int, message: str) -> None:
 
 
 def _write(envelope: dict[str, Any]) -> None:
-    # stdout carries only valid MCP protocol lines -- same rule src/Hello/Program.cs follows, since
+    # stdout carries only valid MCP protocol lines -- same rule tests/MCP/Hello/Program.cs follows, since
     # the stdio transport requires it.
     sys.stdout.write(json.dumps(envelope) + "\n")
     sys.stdout.flush()
@@ -154,7 +154,7 @@ def handle_line(line: str) -> None:
             handle_tools_call(id_, params)
         else:
             write_error(id_, METHOD_NOT_FOUND_CODE, f"Method not found: {method}")
-    except Exception as error:  # stdin is a system boundary -- same reasoning as src/Hello's own catch-all
+    except Exception as error:  # stdin is a system boundary -- same reasoning as tests/MCP/Hello's own catch-all
         write_error(id_, INTERNAL_ERROR_CODE, f"Internal error: {error}")
 
 

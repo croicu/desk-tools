@@ -4,19 +4,14 @@ using Croicu.Desk.Tools.Mocks;
 namespace Croicu.Desk.Tools.Service.Tests.Integration;
 
 /// <summary>
-/// Exercises <see cref="McpToolLauncher"/> against the real, build-generated <c>goodbye</c>
-/// registry entry and the real <c>scripts/goodbye.py</c> it points at -- the first non-.NET
-/// registry entry (see <c>scripts/Scripts.csproj</c>'s own remarks): copied into the shared
-/// <c>out/&lt;Configuration&gt;/net10.0/[&lt;RID&gt;]/</c> folder at build time specifically so it
-/// lands co-located with <c>Service.exe</c> exactly like a .NET tool's own <c>.dll</c> already
-/// does, meaning <see cref="McpToolLauncher"/> needs no Python-specific handling at all -- this
-/// test's own existence is really confirming that co-location assumption holds for a Python tool
-/// too, not just re-proving the redirected-pipe mechanism <c>tests/Service/Integration/HelloTests.cs</c>
-/// already covers. Tagged <see cref="TestCategoryAttribute"/>("Integration") per CLAUDE.md's
-/// Architecture convention 4 -- the default `dotnet test` invocation skips this; run it explicitly
-/// with `dotnet test --filter TestCategory=Integration` (<c>scripts/Scripts.csproj</c> must
-/// already be built, e.g. via a plain `dotnet build`, so <c>goodbye.py</c> and its registry entry
-/// actually exist).
+/// Exercises <see cref="McpToolLauncher"/> against the real <c>goodbye</c> test fixture
+/// (<c>tests/MCP/Goodbye/goodbye.py</c>, issue #86: no longer a shipped tool, so a throwaway registry pointing at
+/// the script stands in, see <see cref="FixtureRegistry"/>) -- the Python flavor of the same end-to-end check
+/// <c>tests/Service/Integration/HelloTests.cs</c> makes for a .NET tool: <see cref="McpToolLauncher"/> needs no
+/// Python-specific handling at all, and a Python tool's redirected stdio carries real MCP traffic too. Tagged
+/// <see cref="TestCategoryAttribute"/>("Integration") per CLAUDE.md's Architecture convention 4 -- the default
+/// `dotnet test` invocation skips this; run it explicitly with `dotnet test --filter TestCategory=Integration`
+/// (needs <c>python</c> on the PATH).
 /// </summary>
 [TestClass]
 [TestCategory("Integration")]
@@ -25,11 +20,11 @@ public sealed class GoodbyeTests
     [TestMethod]
     public void Launch_RealGoodbyeEntry_SayGoodbyeReturnsBye()
     {
-        var outDir = RepoPaths.ResolveOutDir();
-        var registryPath = Path.Combine(outDir, "mcp-registry", "goodbye.json");
-        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build scripts/Scripts.csproj first (e.g. `dotnet build`).");
+        var script = Path.Combine(RepoPaths.FindRepoRoot(), "tests", "MCP", "Goodbye", "goodbye.py");
+        Assert.IsTrue(File.Exists(script), $"'{script}' not found.");
+        var registryDir = FixtureRegistry.Create("goodbye", "python", script);
 
-        using var goodbye = McpToolLauncher.Launch("goodbye", registryBaseDirectory: outDir);
+        using var goodbye = McpToolLauncher.Launch("goodbye", registryBaseDirectory: registryDir);
 
         goodbye.StandardInput.WriteLine("""{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}""");
         goodbye.StandardInput.Flush();

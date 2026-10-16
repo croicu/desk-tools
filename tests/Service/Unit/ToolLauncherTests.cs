@@ -32,14 +32,14 @@ public sealed class ToolLauncherTests
     {
         var env = new Dictionary<string, string> { ["FROM_REGISTRY"] = "1" };
 
-        var info = ToolLauncher.CreateStartInfo("python", ["scripts/goodbye.py", "--x"], env, "C:\\work", showConsole: false);
+        var info = ToolLauncher.CreateStartInfo("python", ["tests/MCP/Goodbye/goodbye.py", "--x"], env, "C:\\work", showConsole: false);
 
         Assert.AreEqual("python", info.FileName);
         Assert.AreEqual("C:\\work", info.WorkingDirectory);
         Assert.IsFalse(info.UseShellExecute);
         Assert.IsTrue(info.RedirectStandardInput);
         Assert.IsTrue(info.RedirectStandardOutput);
-        CollectionAssert.AreEqual(new[] { "scripts/goodbye.py", "--x" }, info.ArgumentList.ToArray());
+        CollectionAssert.AreEqual(new[] { "tests/MCP/Goodbye/goodbye.py", "--x" }, info.ArgumentList.ToArray());
         Assert.AreEqual("1", info.Environment["FROM_REGISTRY"]);
         Assert.AreEqual(Environment.ProcessId.ToString(), info.Environment[ParentWatchdog.EnvironmentVariable]);
     }

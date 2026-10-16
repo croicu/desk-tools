@@ -2,7 +2,6 @@
   <Folder Name="/src/">
     <Project Path="src/Base/Base.csproj" />
     <Project Path="src/Desk/Desk.csproj" />
-    <Project Path="src/Hello/Hello.csproj" />
     <Project Path="src/Launcher/Launcher.csproj" />
     <Project Path="src/Pager/Pager.csproj" />
     <Project Path="src/Secrets/Secrets.csproj" />
@@ -11,12 +10,14 @@
   <Folder Name="/tests/">
     <Project Path="tests/Base/Base.Tests.csproj" />
     <Project Path="tests/Desk/Desk.Tests.csproj" />
-    <Project Path="tests/Hello/Hello.Tests.csproj" />
     <Project Path="tests/Launcher/Launcher.Tests.csproj" />
     <Project Path="tests/Pager/Pager.Tests.csproj" />
     <Project Path="tests/Mocks/Mocks.csproj" />
     <Project Path="tests/Secrets/Secrets.Tests.csproj" />
     <Project Path="tests/Service/Service.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/MCP/">
+    <Project Path="tests/MCP/Hello/Hello.csproj" />
   </Folder>
   <Folder Name="/tests/Apps/">
     <Project Path="tests/Apps/McpSecrets/McpSecrets.App.csproj" />

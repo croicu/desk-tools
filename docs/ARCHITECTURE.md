@@ -10,7 +10,7 @@ capabilities are expected to keep to them.
 
 1. **Service is a convenience, never a gate.** Every MCP tool must be launchable and useful without
    Service -- straight from `.mcp.json` (e.g. `"command": "pager"` for a standalone tool, or
-   `dotnet Hello.dll`). Service and its registry add capabilities (running elevated, delivering
+   `dotnet Pager.dll`). Service and its registry add capabilities (running elevated, delivering
    secrets, ...); they are never a prerequisite. A tool therefore ships as a self-contained
    executable that does not reference Service, Desk, or `Secrets.dll`.
 2. **The manifest is optional, and so is every part of it.** The registry fragment
@@ -33,8 +33,8 @@ capabilities are expected to keep to them.
 
 <!-- One entry per file under src/Base/ (reusable scaffold: Logger/Settings/Context/Errors/
      Interfaces, plus src/Base/Sinks/ for the ILoggingSink implementations, compiled to its own
-     Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), src/Hello/ (a
-     minimal stdio MCP server, references Base.csproj), src/Pager/ (the ntfy pager MCP tool,
+     Base.dll), src/Service/ (the resident-process CLI, references Base.csproj), tests/MCP/ (the hello and
+     goodbye test fixtures: minimal stdio MCP servers, not shipped), src/Pager/ (the ntfy pager MCP tool,
      references Base.csproj only), src/Launcher/ (everything that talks to Service: client, starter, tool
      connection; references Base.csproj), src/Desk/ (a thin command-line wrapper over Launcher), src/Secrets/ (KeePass-backed secret retrieval,
      references Base.csproj), and scripts/ (standalone Python utilities outside
@@ -122,7 +122,7 @@ dispatches each connection to the thread pool via a named handler (reads at most
 newline-delimited JSON-RPC 2.0 request line, dispatches it, and writes at most one JSON-RPC
 response line back, then closes -- see [issue #31](https://github.com/croicu/desk-tools/issues/31)
 for the switch away from this class's earlier plain-text echo protocol; mirrors
-`src/Hello/Program.cs`'s own hand-rolled dispatch style, same error codes/envelope shapes, just one
+`tests/MCP/Hello/Program.cs`'s own hand-rolled dispatch style, same error codes/envelope shapes, just one
 request per TCP connection instead of a persistent stdio read loop), and a
 `System.Threading.Timer`-driven idle check that exits the process once no connection has been
 accepted for `Settings.IdleTimeout`, none is currently in flight, **and no handed-off MCP tool is
@@ -186,18 +186,19 @@ Runs at the installing user's own logon (their interactive token, highest privil
 allows), started immediately after install too rather than only from the next logon; cleaned up
 on rollback/genuine uninstall.
 
-`installer/Setup.wixproj`'s `PublishAppForSetup` target publishes `Service.csproj`, `Hello.csproj`,
-and `Desk.csproj` -- all three, not Service alone -- into the same shared `$(AppPublishDir)`
+`installer/Setup.wixproj`'s `PublishAppForSetup` target publishes `Service.csproj`, `Desk.csproj` and
+`Pager.csproj` -- all three, not Service alone -- into the same shared `$(AppPublishDir)`
 `Package.wxs`'s `Files` glob bundles wholesale (see issue #29): none of the three reference each
-other, so publishing only one would never pull the others in, and `Hello`'s own build-time-generated
-`mcp-registry/hello.json` (see `docs/PROTOCOL.md`) would otherwise reference a `Hello.dll` that was
+other, so publishing only one would never pull the others in, and `Pager`'s own build-time-generated
+`mcp-registry/pager.json` (see `docs/PROTOCOL.md`) would otherwise reference a `Pager.dll` that was
 never actually shipped in the MSI at all. Confirmed by reading the built `.msi`'s own `File` table
-directly, not just the intermediate publish folder -- `Hello.exe`/`Desk.exe`/`Service.exe` and
-`mcp-registry/hello.json` are all genuinely embedded.
+directly, not just the intermediate publish folder -- `Pager.exe`/`Desk.exe`/`Service.exe` and
+`mcp-registry/pager.json` are all genuinely embedded. The hello and goodbye tools are test fixtures
+under `tests/MCP` ([issue #86](https://github.com/croicu/desk-tools/issues/86)) and are not published.
 
 `src/Pager/` ([issue #76](https://github.com/croicu/desk-tools/issues/76)): the ntfy pager, the first tool that
 keeps to the invariants above end to end. A hand-rolled stdio MCP server in `Program.cs` (the same shape as
-`src/Hello`'s -- a shared MCP stdio helper in `Base` is the obvious next step once a third tool needs it, not
+`tests/MCP/Hello`'s -- a shared MCP stdio helper in `Base` is the obvious next step once a third tool needs it, not
 before), one tool, `page`, with `PagerConfig` (reads `NTFY_TOPIC`/`NTFY_SERVER` from the environment, never
 throws, leaves a `Problem` that only a `page` call reports) and `Notifier` (one JSON `POST` through an injectable
 `HttpMessageHandler`, so tests stay offline; never throws for a failed send; the topic is never in the URL, the
@@ -209,7 +210,9 @@ hands off to a `.dev` build when `link-program-files` has set one up. It is publ
 fragment declares `NTFY_TOPIC` (`<McpSecret Include="NTFY_TOPIC" Entry="ntfy" Key="desk-pager" />`), so through
 Service the topic arrives from KeePass; run any other way it is simply an environment variable.
 
-`src/Hello/Program.cs`: a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
+`tests/MCP/Hello/Program.cs` ([issue #86](https://github.com/croicu/desk-tools/issues/86): a **test fixture**, no
+longer a shipped tool -- no generated registry fragment, not in the installer, not in `.mcp.json`; the integration
+tests launch it through a throwaway registry, `Mocks`' `FixtureRegistry`): a minimal, hand-rolled (no MCP SDK) MCP server over stdio -- see
 `docs/PROTOCOL.md` for the exact methods/shapes it implements. Reads newline-delimited JSON-RPC
 requests from stdin in a loop until EOF (or a `stop` tool call, below) ends it, dispatches
 `initialize`/`tools/list`/`tools/call`, and writes at most one response line per request via
@@ -219,8 +222,8 @@ MCP"; and `stop`, a graceful shutdown -- `HandleLine`/`HandleToolsCall` return a
 reading?") up through the dispatch chain specifically so `stop`'s handler can write its own response
 first, then have `Run`'s read loop break the same way it would on EOF, rather than an abrupt
 `Environment.Exit` that could cut output off mid-flush. Exists so a dev loop rebuilding `Hello.dll`
-can ask a locally-running instance to release its file lock via a normal `tools/call` instead of an
-external process kill -- see the `stop-hello` skill under `.claude/skills/`. No Settings/persistent
+could ask a locally-running instance to release its file lock via a normal `tools/call` instead of an
+external process kill (the `stop-hello` skill that did so is gone with the tool's retirement). No Settings/persistent
 state -- everything it needs is a handful of `const`s and two static tool definitions. Parses one
 CLI flag of its own, `--log <dir>`
 (see `docs/PROTOCOL.md`), since a stdio server that can never print to its own console needs a
@@ -240,7 +243,7 @@ Hello's own `Start` already uses for its `input` parameter), since `Context.Star
 is a plain `Func<int>`. For `mcp`, `Start` also installs a silent `DiagnosticsLog` sink *before*
 `Context.Start` can install a real, printing one -- once `McpProxy.Run` starts relaying the
 launched tool's own stdout, this process's stdout must carry only that traffic, the same reasoning
-`src/Hello/Program.cs`'s own `Start` already documents for itself (no `ProjectReference` to
+`tests/MCP/Hello/Program.cs`'s own `Start` already documents for itself (no `ProjectReference` to
 cross-link a real `<see cref>` to it). The actual connect/send/read exchange, starting Service and opening a launched tool's pipes all live in the
 Launcher assembly (`src/Launcher`, see below; [issue #74](https://github.com/croicu/desk-tools/issues/74)): Desk is a
 thin command-line wrapper over it -- argument parsing, console and log setup, and turning the Launcher's answers into
@@ -343,10 +346,10 @@ tool registry entry and [issue #29](https://github.com/croicu/desk-tools/issues/
 deliberately small step toward CLAUDE.md's own Mission ("a service for running MCP servers... at a
 high privilege mode") -- at build time, writes one small `{"name": ..., "reference": ...}` JSON file
 per MCP tool into `$(OutDir)mcp-registry/`, for any project that opts in via its own
-`<McpToolName>` property (`src/Hello/Hello.csproj` sets `<McpToolName>hello</McpToolName>`).
+`<McpToolName>` property (`src/Pager/Pager.csproj` sets `<McpToolName>pager</McpToolName>`).
 Deliberately a property, not an item, unlike `CopySettingsToOutput`'s own `settings.json`/
 `settings.local.json` `Copy` tasks above -- MSBuild properties don't propagate to a referencing
-project's own build the way items can, so `Hello.Tests` referencing `Hello.csproj` doesn't also
+project's own build the way items can, so `Pager.Tests` referencing `Pager.csproj` doesn't also
 pick up a registry entry the way `CopyToOutputDirectory` items once leaked into every test project
 (see that same section's own history). `src/Service/McpToolLauncher.cs` is the first consumer (see
 below); `Host`'s own `mcp` JSON-RPC method (issue #32) is the real trigger on top of it -- but
@@ -358,18 +361,19 @@ stdio transport requires whatever process launches a server to also hold its std
 which a proxying Service would satisfy by keeping the pipes itself and relaying bytes, instead of
 handing them off the way `HandleDuplicator` does.
 
-`scripts/Scripts.csproj`/`scripts/goodbye.py`: the first non-.NET MCP registry entry -- a
+`scripts/Scripts.csproj`: the non-.NET MCP registry entries (the Python tools `link-program-files` and
+`unlink-program-files`; `goodbye`, the first, is a test fixture under `tests/MCP/Goodbye` now, issue #86) -- a
 `Microsoft.Build.NoTargets` project (no C# of its own, just custom MSBuild targets) since Python
 tools live in `scripts/` (edited/checked in there) rather than each getting a `src/`-style per-tool project.
 Explicitly `<Import>`s `src/Directory.Build.props` (`scripts/` isn't a descendant of `src/` or
 `tests/`, so MSBuild's own auto-import wouldn't find it) specifically to reuse its
 `BaseOutputPath`/`RuntimeIdentifier` default rather than duplicating them -- the whole point being
 that a Python tool's build-time destination is that *identical* shared `out/<Configuration>/
-net10.0/[<RID>/]` folder `Service.csproj`/`Hello.csproj`/`Desk.csproj` already build into, just one
+net10.0/[<RID>/]` folder `Service.csproj`/`Pager.csproj`/`Desk.csproj` already build into, just one
 level down: the `.py` files themselves land in a `scripts/` subfolder of it (mirroring the repo's
 own `scripts/` layout), while `mcp-registry/<name>.json` still lands directly in that shared
 folder, right next to `Service.exe`, same as a .NET tool's own registry entry. An
-`<McpPythonTool Include="goodbye" />` item (mirroring `<McpToolName>`'s per-project opt-in for .NET
+`<McpPythonTool Include="link-program-files" />` item (mirroring `<McpToolName>`'s per-project opt-in for .NET
 tools, just item-based since this one project covers every Python tool) drives two pairs of
 targets, batched via `Inputs`/`Outputs` over the item so each runs once per tool: one pair copies
 `scripts/<name>.py` into `$(OutDir)scripts\`/`$(PublishDir)scripts\` (`AfterTargets="Build"`/
@@ -383,11 +387,11 @@ resolved relative to the registry's own directory" already covers a `scripts/<na
 relative path exactly like it covers a bare one, no new path-resolution logic needed anywhere.
 `link-program-files.py`'s own target-directory computation accounts for this same one-level offset
 (walks up two directories from `__file__`, not one, to land back on `$(OutDir)` itself rather than
-its own `scripts/` subfolder -- see that script's own remarks). `scripts/goodbye.py`
-itself mirrors `src/Hello`'s hand-rolled JSON-RPC shape (no SDK, same protocol
-version/error codes) but fully self-contained -- one tool, `say_goodbye`, returning `"Bye from
-MCP"`. Verified live end-to-end (`desk mcp goodbye`, a real elevated `Service` launching the
-real Python process) and by `tests/Service/Integration/GoodbyeTests.cs`.
+its own `scripts/` subfolder -- see that script's own remarks). `tests/MCP/Goodbye/goodbye.py` is the Python flavor of
+the end-to-end fixture: it mirrors `tests/MCP/Hello`'s hand-rolled JSON-RPC shape (no SDK, same protocol
+version/error codes) but is fully self-contained -- one tool, `say_goodbye`, returning `"Bye from MCP"` -- and
+`tests/Service/Integration/GoodbyeTests.cs` launches it through a throwaway registry to show that a Python tool's
+redirected stdio carries real MCP traffic through `McpToolLauncher` with no Python-specific code.
 
 `src/Service/ToolConsole.cs` + `ToolLauncher.CreateStartInfo` ([issue #44](https://github.com/croicu/desk-tools/issues/44)):
 whether a launched tool gets a visible console window. `Host` asks `ToolConsole.IsVisible(name, settings)` per launch --
@@ -445,7 +449,7 @@ this repo's usual error-surfacing convention rather than letting a raw BCL excep
 
 `ToolLauncher.Launch` also sets `DESK_PARENT_PID` (Service's own PID; set after the registry's `env`
 so a fragment can't override it) in every child's environment. `src/Base/ParentWatchdog.cs`
-(`ParentWatchdog.Start`, called early by Hello; the Python tools carry a small inline copy, since
+(`ParentWatchdog.Start`, called early by Pager (and the Hello fixture); the Python tools carry a small inline copy, since
 `scripts/` are intentionally self-contained) waits on that PID from a background thread and exits
 the tool once it's gone -- the reaping path for a forced `shutdown` or a Service crash, where
 `Host`'s own wait-for-children can't help ([issue #45](https://github.com/croicu/desk-tools/issues/45)).
@@ -500,12 +504,12 @@ cross-privilege-boundary behavior -- elevated `Service` into unelevated `Desk` -
 validated manually via a throwaway spike before this was built); and
 `tests/Service/Integration/HelloTests.cs`'s own `Mcp_RealHelloEntry_...` test drives the entire real
 path end-to-end -- a real `Host` handling a real `mcp` JSON-RPC request over its loopback listener,
-launching the real, build-generated `hello` registry entry, and a real `initialize`
+launching the `tests/MCP/Hello` fixture through a throwaway registry, and a real `initialize`
 request/response exchanged entirely through the duplicated handles, not `Host`'s own pipes. That
 test is Windows-only, guarded at runtime (checking whether the resolved output directory's own name
 is "win-x64" -- `Service.csproj`'s own `Platform/` selection, not the literal host OS, decides which
 `HandleDuplicator` variant gets linked in) rather than a compile-time `Platform/` split, since its
-only other precondition (the real Hello build) has nothing to do with the RID either. Passes on a
+only other precondition (the built Hello fixture) has nothing to do with the RID either. Passes on a
 plain `dotnet test` now, since win-x64 is `tests/Directory.Build.props`' own default -- the guard
 only actually fires if someone deliberately overrides to a different RID.
 

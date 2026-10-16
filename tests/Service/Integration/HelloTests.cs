@@ -8,11 +8,11 @@ using Microsoft.Win32.SafeHandles;
 namespace Croicu.Desk.Tools.Service.Tests.Integration;
 
 /// <summary>
-/// Exercises <see cref="McpToolLauncher"/> against the real, build-generated <c>hello</c> registry
-/// entry (<c>out/&lt;Configuration&gt;/net10.0/[win-x64/]mcp-registry/hello.json</c>, see issue #29)
-/// and the real <c>Hello.exe</c>/<c>Hello.dll</c> it points at -- confirms the redirected
-/// stdin/stdout pipes actually carry working MCP traffic, not just that a process object exists
-/// (issue #30's own verification plan). Named for its counterpart (<c>Hello</c>), not repeating
+/// Exercises <see cref="McpToolLauncher"/> against the real <c>Hello</c> test fixture
+/// (<c>tests/MCP/Hello</c>, issue #86: no longer a shipped tool, so there is no build-generated registry entry --
+/// a throwaway registry pointing at its built <c>Hello.dll</c> stands in, see <see cref="FixtureRegistry"/>)
+/// -- confirms the redirected stdin/stdout pipes actually carry working MCP traffic, not just that a process
+/// object exists (issue #30's own verification plan). Named for its counterpart (<c>Hello</c>), not repeating
 /// "Service" -- this already lives under Service's own test tree, same reasoning as <c>Client</c>
 /// (not <c>DeskClient</c>) in CLAUDE.md's Coding Style, and precedent set by
 /// <c>tests/Desk/Integration/ServiceTests.cs</c>. Stays under <c>tests/Service</c> rather than
@@ -21,22 +21,27 @@ namespace Croicu.Desk.Tools.Service.Tests.Integration;
 /// no build-time coupling needed. Tagged <see cref="TestCategoryAttribute"/>("Integration") per
 /// CLAUDE.md's Architecture convention 4 -- the default `dotnet test` invocation
 /// (`--filter TestCategory!=Integration`) skips this; run it explicitly with
-/// `dotnet test --filter TestCategory=Integration` (Hello.csproj must already be built, so its own
-/// mcp-registry/hello.json and Hello.dll actually exist -- this doesn't build it itself,
-/// deliberately staying decoupled rather than adding a ProjectReference just to resolve a path).
+/// `dotnet test --filter TestCategory=Integration` (Hello.dll is built along with Service.Tests, through a
+/// build-order-only ProjectReference).
 /// </summary>
 [TestClass]
 [TestCategory("Integration")]
 public sealed class HelloTests
 {
+    /// <summary>A throwaway registry launching the built Hello fixture (<c>dotnet Hello.dll</c>).</summary>
+    private static string HelloRegistry()
+    {
+        var dll = Path.Combine(RepoPaths.ResolveFixtureOutDir("Hello"), "Hello.dll");
+        Assert.IsTrue(File.Exists(dll), $"'{dll}' not found -- build tests/MCP/Hello first (e.g. `dotnet build`).");
+        return FixtureRegistry.Create("hello", "dotnet", dll);
+    }
+
     [TestMethod]
     public void Launch_RealHelloEntry_InitializeRequestGetsARealResponse()
     {
-        var outDir = RepoPaths.ResolveOutDir();
-        var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
-        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build`).");
+        var registryDir = HelloRegistry();
 
-        using var hello = McpToolLauncher.Launch("hello", registryBaseDirectory: outDir);
+        using var hello = McpToolLauncher.Launch("hello", registryBaseDirectory: registryDir);
 
         hello.StandardInput.WriteLine("""{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}""");
         hello.StandardInput.Flush();
@@ -76,10 +81,9 @@ public sealed class HelloTests
             return;
         }
 
-        var registryPath = Path.Combine(outDir, "mcp-registry", "hello.json");
-        Assert.IsTrue(File.Exists(registryPath), $"'{registryPath}' not found -- build Hello first (e.g. `dotnet build`).");
+        var registryDir = HelloRegistry();
 
-        var host = new Host(new TestSettings { IdleTimeout = 5 }, port: 0, mcpRegistryBaseDirectory: outDir);
+        var host = new Host(new TestSettings { IdleTimeout = 5 }, port: 0, mcpRegistryBaseDirectory: registryDir);
         host.Start();
 
         try

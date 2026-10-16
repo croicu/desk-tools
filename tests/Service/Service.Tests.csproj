@@ -18,6 +18,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Service\Service.csproj" />
     <ProjectReference Include="..\Mocks\Mocks.csproj" />
+    <!-- The hello test fixture (issue #86): referenced only so it is built before the integration tests that launch
+         it, never as an assembly. -->
+    <ProjectReference Include="..\MCP\Hello\Hello.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

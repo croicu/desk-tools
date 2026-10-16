@@ -454,15 +454,13 @@ dotnet build installer/Setup.wixproj
 
 ## New Task
 
-- **Launcher assembly** -- [issue #74](https://github.com/croicu/desk-tools/issues/74): everything that talks to
-  Service (client, starter, a launched tool's stdio) moves out of `src/Desk` into `src/Launcher`
-  (`Croicu.Desk.Tools.Service.Launcher`), so Desk is a thin command-line wrapper and the test apps no longer need
-  `Desk.exe`. The issue holds the design.
+- **Retire hello and goodbye** -- [issue #86](https://github.com/croicu/desk-tools/issues/86): the two experimental
+  tools leave the product (installer, registry, `.mcp.json`, the `stop-hello` skill) and live on as test fixtures
+  under `tests/MCP`; the integration tests launch them through a throwaway registry.
 
 ## Pending Tasks
 
-- Backlog: #67 (async secret delivery), #51 (Linux Secrets support), #34 (Linux handle handoff), #44 (hide tool
-  console windows in shipped builds).
+- Backlog: #67 (async secret delivery), #51 (Linux Secrets support), #34 (Linux handle handoff).
 
 ## Completed Tasks
 - **Secrets** — [issue #50](https://github.com/croicu/desk-tools/issues/50): elevated MCP tools get credentials from
