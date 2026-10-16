@@ -34,6 +34,14 @@ public sealed class ProgramTests
     }
 
     [TestMethod]
+    public void ParseArgs_ForgetPassword_SetsCommand()
+    {
+        var arguments = Program.ParseArgs(["forget-password"]);
+
+        Assert.AreEqual(DeskCommand.ForgetPassword, arguments.Command);
+    }
+
+    [TestMethod]
     public void ParseArgs_Log_SetsLogDir()
     {
         var arguments = Program.ParseArgs(["ping", "--log", "/var/log/desk"]);

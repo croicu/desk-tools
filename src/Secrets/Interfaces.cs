@@ -22,4 +22,10 @@ public interface ISecretBroker : IDisposable
     /// were decoded from are zeroed.
     /// </summary>
     IReadOnlyDictionary<string, string> Read(string entry, IReadOnlyList<string> keys);
+
+    /// <summary>
+    /// Forgets the master password: the one held in memory and the one remembered on disk (issue #84), so the next
+    /// <see cref="Read"/> asks the user again. Not an error if there is none.
+    /// </summary>
+    void Forget();
 }

@@ -23,6 +23,11 @@ namespace Croicu.Desk.Tools.Secrets;
 /// without the secret); a failure to show it is logged and treated the same way -- an optional
 /// capability must never wedge a launch.</item>
 /// <item>Only reused for the same database.</item>
+/// <item><b>Remembered across runs</b> (issue #84), when an <see cref="IPasswordStore"/> is supplied: a password that
+/// <see cref="Accepted"/> says KeePassXC actually accepted is saved, and the next run -- with nothing held yet --
+/// loads it instead of asking. Until explicitly forgotten (<see cref="Forget"/>) or rejected
+/// (<see cref="Rejected"/>: the password was changed in KeePassXC). A store that fails is a warning, never a
+/// failed launch: the prompt just comes up as if nothing were remembered.</item>
 /// </list>
 /// The held password is a pinned byte array, zeroed when dropped. Callers get <i>copies</i>, so
 /// <see cref="Vault"/> zeroing the one it was handed never wipes the held one.
@@ -41,9 +46,16 @@ internal sealed class PromptedPassword : IPasswordSource, IDisposable
 
     private bool _disposed;
 
-    internal PromptedPassword(IPasswordPrompt prompt)
+    // The remembered password: null means the feature is off (nothing is ever read or written).
+    private readonly IPasswordStore? _store;
+
+    // True once what is held is also in the store (loaded from it, or saved after being accepted).
+    private bool _persisted;
+
+    internal PromptedPassword(IPasswordPrompt prompt, IPasswordStore? store = null)
     {
         _prompt = prompt;
+        _store = store;
     }
 
     public byte[]? Get(string databasePath, int attempt)
@@ -64,6 +76,14 @@ internal sealed class PromptedPassword : IPasswordSource, IDisposable
             {
                 // Whatever was held is for another database; never hand it to this one.
                 Drop();
+
+                // First attempt only: a remembered password that KeePassXC then rejects is forgotten (Rejected), so
+                // asking again after a failed attempt must not load the same bad one back.
+                if (attempt == 0 && TryLoadRemembered(databasePath))
+                {
+                    return Copy(_held!);
+                }
+
                 OpenPrompt(databasePath, attempt);
             }
             else if (!SameDatabase(_pendingFor, databasePath))
@@ -101,6 +121,41 @@ internal sealed class PromptedPassword : IPasswordSource, IDisposable
             }
 
             Drop();
+
+            // Whatever was remembered is the password that was just rejected (or one like it): it is wrong now.
+            ForgetRemembered();
+        }
+    }
+
+    public void Accepted()
+    {
+        lock (_lock)
+        {
+            if (_store is null || _held is null || _heldFor is null || _persisted)
+            {
+                return;
+            }
+
+            try
+            {
+                _store.Save(_heldFor, _held);
+                _persisted = true;
+                Logger.Info($"secrets: the master password for '{_heldFor}' was accepted; remembering it.", LogCategory.Secrets);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                Logger.Warning($"secrets: could not remember the master password ({error.Message}); it is held for this run only.", LogCategory.Secrets);
+            }
+        }
+    }
+
+    public void Forget()
+    {
+        lock (_lock)
+        {
+            Drop();
+            ForgetRemembered();
+            Logger.Info("secrets: the master password was forgotten.", LogCategory.Secrets);
         }
     }
 
@@ -174,6 +229,57 @@ internal sealed class PromptedPassword : IPasswordSource, IDisposable
         }
     }
 
+    /// <summary>Loads the remembered password for <paramref name="databasePath"/> into the held slot. Must be called with <see cref="_lock"/> held. False if none (or the store failed).</summary>
+    private bool TryLoadRemembered(string databasePath)
+    {
+        if (_store is null)
+        {
+            return false;
+        }
+
+        byte[]? remembered;
+        try
+        {
+            remembered = _store.Load(databasePath);
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            Logger.Warning($"secrets: could not read the remembered master password ({error.Message}); asking instead.", LogCategory.Secrets);
+            return false;
+        }
+
+        if (remembered is null)
+        {
+            return false;
+        }
+
+        // Pinned, like every held copy (the store's own array is the caller's to zero).
+        _held = Copy(remembered);
+        _heldFor = databasePath;
+        _persisted = true;
+        CryptographicOperations.ZeroMemory(remembered);
+        Logger.Info($"secrets: using the remembered master password for '{databasePath}'.", LogCategory.Secrets);
+        return true;
+    }
+
+    /// <summary>Deletes the remembered password, if the feature is on. Must be called with <see cref="_lock"/> held; never throws.</summary>
+    private void ForgetRemembered()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _store.Forget();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            Logger.Warning($"secrets: could not forget the remembered master password ({error.Message}).", LogCategory.Secrets);
+        }
+    }
+
     private byte[]? TakeHeldCopy(string databasePath)
     {
         return _held is not null && SameDatabase(_heldFor, databasePath) ? Copy(_held) : null;
@@ -188,6 +294,7 @@ internal sealed class PromptedPassword : IPasswordSource, IDisposable
 
         _held = null;
         _heldFor = null;
+        _persisted = false;
     }
 
     private static bool SameDatabase(string? left, string right)

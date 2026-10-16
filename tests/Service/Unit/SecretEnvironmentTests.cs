@@ -87,6 +87,10 @@ public sealed class SecretEnvironmentTests
             return result;
         }
 
+        public int Forgets { get; private set; }
+
+        public void Forget() => Forgets++;
+
         public void Dispose()
         {
         }

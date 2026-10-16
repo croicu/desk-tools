@@ -46,6 +46,49 @@ public sealed class VaultTests
     }
 
     [TestMethod]
+    public void Read_Success_TellsThePasswordSourceItWasAcceptedExactlyOnce()
+    {
+        var runner = new FakeProcessRunner();
+        runner.Enqueue(1);
+        runner.Enqueue(0, stdout: "k: v");
+        var passwords = new FakePasswordSource("wrong", "right");
+        var vault = CreateVault(runner, passwords);
+
+        vault.Read("ntfy", ["k"]);
+
+        // Only the password KeePassXC opened the database with is "accepted"; the rejected one never is.
+        Assert.AreEqual(1, passwords.AcceptedCount);
+    }
+
+    [TestMethod]
+    public void Read_PasswordNeverAccepted_IsNeverReportedAsAccepted()
+    {
+        var runner = new FakeProcessRunner();
+        runner.Enqueue(1);
+        runner.Enqueue(1);
+        runner.Enqueue(1);
+        var passwords = new FakePasswordSource("a", "b", "c");
+        var vault = CreateVault(runner, passwords);
+
+        Assert.ThrowsExactly<AppError>(() => vault.Read("ntfy", ["k"]));
+
+        Assert.AreEqual(0, passwords.AcceptedCount);
+    }
+
+    [TestMethod]
+    public void Read_CliFailsForAnotherReason_IsNotReportedAsAccepted()
+    {
+        var runner = new FakeProcessRunner();
+        runner.Enqueue(1, stderr: "Could not find entry with path nosuch.");
+        var passwords = new FakePasswordSource("pw");
+        var vault = CreateVault(runner, passwords);
+
+        Assert.ThrowsExactly<AppError>(() => vault.Read("nosuch", ["k"]));
+
+        Assert.AreEqual(0, passwords.AcceptedCount);
+    }
+
+    [TestMethod]
     public void Read_PasswordRejectedEveryTime_ThrowsAfterThreeAttempts()
     {
         var runner = new FakeProcessRunner();
